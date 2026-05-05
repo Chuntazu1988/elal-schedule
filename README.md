@@ -1,1 +1,0 @@
-# elal-schedule
