@@ -526,17 +526,7 @@ if st.button("🚀 בנה שיבוץ", use_container_width=True):
         workload_df = build_workload(schedule_df, employees_df)
         output_df = build_output_table(edited_flights, labeled_df)
 
-        st.success("השיבוץ נבנה בהצלחה!")
-
-        st.subheader("📋 שיבוץ")
-        st.dataframe(output_df, use_container_width=True)
-
-        missing = schedule_df[schedule_df["עובד"].astype(str).str.contains("❌", na=False)]
-        if not missing.empty:
-            st.warning(f"נמצאו {len(missing)} חוסרים")
-            st.dataframe(missing, use_container_width=True)
-
-        excel_data = to_excel_bytes(output_df, workload_df)
+        חוסרים")
 
         st.download_button(
             "⬇️ הורדת אקסל שיבוץ",
