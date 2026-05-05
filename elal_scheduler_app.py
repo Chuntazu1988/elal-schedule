@@ -11,19 +11,19 @@ from openpyxl.utils import get_column_letter
 st.set_page_config(page_title="מערכת שיבוץ טיסות", page_icon="✈️", layout="wide")
 
 st.markdown("""
+st.markdown("""
 <style>
 .main-title {
     font-size: 36px;
     font-weight: 900;
     color: #003B7A;
-    margin-bottom: 0;
 }
 .sub-title {
     color: #5f6f89;
     font-size: 16px;
-    margin-top: 0;
-    margin-bottom: 24px;
 }
+</style>
+""", unsafe_allow_html=True)
 </style>
 """, unsafe_allow_html=True)
 }
