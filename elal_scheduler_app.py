@@ -12,9 +12,20 @@ st.set_page_config(page_title="מערכת שיבוץ טיסות", page_icon="✈
 
 st.markdown("""
 <style>
-html, body, [class*="css"] {
-    direction: rtl;
-    text-align: right;
+.main-title {
+    font-size: 36px;
+    font-weight: 900;
+    color: #003B7A;
+    margin-bottom: 0;
+}
+.sub-title {
+    color: #5f6f89;
+    font-size: 16px;
+    margin-top: 0;
+    margin-bottom: 24px;
+}
+</style>
+""", unsafe_allow_html=True)
 }
 .main-title {
     font-size: 36px;
