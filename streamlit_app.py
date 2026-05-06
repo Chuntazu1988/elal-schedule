@@ -1274,7 +1274,7 @@ if st.button("🚀 בנה שיבוץ", use_container_width=True):
         schedule_df = build_schedule(edited_flights, employees_df)
         labeled_df = build_next_task_labels(schedule_df, employees_df)
         workload_df = build_workload(schedule_df, employees_df)
-        continuity_df = build_counter_continuity_rows(labeled_df, employees_df)
+        continuity_df = pd.DataFrame()
         output_df = build_output_table(edited_flights, labeled_df, employees_df)
 
         missing = schedule_df[schedule_df["עובד"].astype(str).str.contains("❌", na=False)]
