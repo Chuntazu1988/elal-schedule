@@ -1603,6 +1603,117 @@ def build_output_table(flights_df, result_labeled, employees_df):
 
 
 # =========================
+# MANUAL SWAP HELPERS
+# =========================
+
+def get_qualified_candidates_for_swap(schedule_df, employees_df, flight_num, role_base, task_idx):
+    """
+    Return employees who:
+    1. Are certified for role_base
+    2. Are within shift for the task's time window
+    3. Are not already assigned to an overlapping task on a different flight
+       (being on the same flight is OK – we're replacing)
+    The current assignee is excluded (they are the one being swapped out).
+    """
+    task_row = schedule_df.loc[task_idx]
+    start_str = str(task_row.get("התחלה", ""))
+    end_str   = str(task_row.get("סיום",   ""))
+    current_worker = str(task_row.get("עובד", ""))
+
+    # Map role_base → employee column name
+    role_col_map = {
+        "ראש צוות":    "ראש צוות",
+        "דייל":        "דייל",
+        "מתאם תורים":  "מתאם תורים",
+        "מפקח TSA":    "מפקח TSA",
+        "שומר TSA":    "שומר TSA",
+        "טרייני רצ":   "טרייני רצ",
+        "טרייני ר״צ":  "טרייני רצ",
+    }
+    col = role_col_map.get(normalize_role_label(role_base), role_base)
+
+    if col not in employees_df.columns:
+        return []
+
+    certified = employees_df[employees_df[col].astype(str).str.strip() == "כן"].copy()
+
+    if not is_time_text(start_str) or not is_time_text(end_str):
+        # No time info – return all certified except current
+        return [n for n in certified["שם"].tolist() if n != current_worker]
+
+    try:
+        task_start = to_datetime_time(start_str)
+        task_end   = to_datetime_time(end_str)
+    except Exception:
+        return []
+
+    # Build a quick assignment lookup excluding this task itself
+    other_tasks = schedule_df[schedule_df.index != task_idx].copy()
+    other_tasks = other_tasks[other_tasks["התחלה"].astype(str).str.strip() != ""]
+
+    results = []
+    for _, emp_row in certified.iterrows():
+        name = emp_row["שם"]
+        if name == current_worker:
+            continue
+
+        # Shift check
+        if not is_within_shift(emp_row, task_start, task_end):
+            continue
+
+        # Availability check (no overlap with other tasks this person already has)
+        person_tasks = other_tasks[other_tasks["עובד"].astype(str) == name]
+        conflict = False
+        buffer = __import__("datetime").timedelta(minutes=5)
+        for _, pt in person_tasks.iterrows():
+            try:
+                ps = to_datetime_time(str(pt["התחלה"]))
+                pe = to_datetime_time(str(pt["סיום"]))
+                if not (task_start >= pe + buffer or task_end <= ps - buffer):
+                    conflict = True
+                    break
+            except Exception:
+                pass
+        if not conflict:
+            results.append(name)
+
+    return results
+
+
+def do_swap(schedule_df, task_idx, new_worker, displaced_action, displaced_target_flight=None):
+    """
+    Perform the swap on schedule_df (in place on a copy).
+    displaced_action: "unassign" | "move"
+    displaced_target_flight: flight number string if action == "move"
+    Returns the updated schedule_df.
+    """
+    df = schedule_df.copy()
+    old_worker = str(df.at[task_idx, "עובד"])
+
+    # Set new worker
+    df.at[task_idx, "עובד"] = new_worker
+
+    if displaced_action == "unassign":
+        # Mark the old worker as missing in their original slot (already replaced above)
+        pass  # nothing more needed; old slot now has new_worker
+
+    elif displaced_action == "move" and displaced_target_flight:
+        # Find an open (❌) slot on the target flight with the same base role
+        role_base = str(df.at[task_idx, "תפקיד בסיס"])
+        target_mask = (
+            (df["טיסה"].astype(str).str.strip() == displaced_target_flight.strip()) &
+            (df["תפקיד בסיס"].astype(str) == role_base) &
+            (df["עובד"].astype(str).str.contains("❌"))
+        )
+        target_slots = df[target_mask]
+        if not target_slots.empty:
+            first_slot = target_slots.index[0]
+            df.at[first_slot, "עובד"] = old_worker
+
+    return df
+
+
+# =========================
 # DISPLAY
 # =========================
 
@@ -1687,9 +1798,143 @@ def render_flight_card(row):
             render_line("אין שיבוץ")
 
 
-# =========================
-# EXPORT
-# =========================
+def render_flight_card_with_swap(row, schedule_df, employees_df):
+    """
+    Like render_flight_card but each assignment line has an expander below it
+    that lets the user swap the employee.
+    """
+    aircraft = str(row["מטוס/רישוי"]).replace("\n", " / ")
+    reqs     = str(row["תפקידים דרושים"])
+    left_text  = str(row["ראש צוות / מתאם תורים / מפקח TSA"])
+    right_text = str(row["דיילים / שומר TSA"])
+    fnum = str(row["מספר טיסה"]).strip()
+
+    required_line = " | ".join([part.strip() for part in reqs.split("|") if part.strip()]) or "לא הוגדרו תפקידים"
+
+    st.markdown(
+        f"""
+        <div class="flight-card">
+          <div class="flight-head">
+            <div class="flight-row">
+              <div class="flight-name">✈️ {safe_html(fnum)} ← {safe_html(row['יעד'])}</div>
+              <div class="flight-meta">🕒 {safe_html(row['זמנים'])} | 🛩️ {safe_html(aircraft)}</div>
+            </div>
+            <div class="req-line">תפקידים דרושים: {safe_html(required_line)}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    c1, c2 = st.columns(2)
+
+    def render_lines_with_swap(panel_lines):
+        for line in panel_lines:
+                role_part, text_part = (line.split("||", 1) if "||" in line else ("", line))
+                render_line(text_part, role_part)
+
+                # Find this task in schedule_df
+                # Match by flight number + base role + worker name (strip shift suffix)
+                worker_raw = text_part.split(" - ")[0].strip() if " - " in text_part else text_part.split(" (")[0].strip()
+                role_base  = normalize_role_label(role_part) if role_part else ""
+
+                # Find matching row index in schedule_df
+                flight_tasks = schedule_df[
+                    schedule_df["טיסה"].astype(str).str.strip() == fnum
+                ]
+                match = flight_tasks[
+                    (flight_tasks["עובד"].astype(str).str.contains(re.escape(worker_raw), na=False)) &
+                    (flight_tasks["תפקיד בסיס"].astype(str).apply(normalize_role_label) == role_base)
+                ]
+                if match.empty:
+                    # Try matching by role only (for ❌ missing lines)
+                    match = flight_tasks[
+                        flight_tasks["תפקיד בסיס"].astype(str).apply(normalize_role_label) == role_base
+                    ]
+
+                if match.empty:
+                    continue
+
+                task_idx = match.index[0]
+
+                expander_label = f"✏️ החלף: {worker_raw} ({role_base})"
+                with st.expander(expander_label, expanded=False):
+                    candidates = get_qualified_candidates_for_swap(
+                        schedule_df, employees_df, fnum, role_base, task_idx
+                    )
+
+                    if not candidates:
+                        st.warning("אין עובדים מוסמכים ופנויים להחלפה בשלב זה.")
+                    else:
+                        selected_new = st.selectbox(
+                            "בחר עובד חלופי:",
+                            options=candidates,
+                            key=f"swap_select_{task_idx}",
+                        )
+
+                        st.markdown("---")
+                        st.markdown(f"**מה לעשות עם {worker_raw} לאחר ההחלפה?**")
+
+                        action = st.radio(
+                            "פעולה:",
+                            options=["השאר ללא שיבוץ (בדלפקים)", "העבר לחריץ פנוי בטיסה אחרת"],
+                            key=f"swap_action_{task_idx}",
+                            horizontal=True,
+                        )
+
+                        target_flight = None
+                        if action == "העבר לחריץ פנוי בטיסה אחרת":
+                            other_flights = sorted(
+                                schedule_df[
+                                    (schedule_df["טיסה"].astype(str).str.strip() != fnum) &
+                                    (schedule_df["עובד"].astype(str).str.contains("❌")) &
+                                    (schedule_df["תפקיד בסיס"].astype(str).apply(normalize_role_label) == role_base)
+                                ]["טיסה"].astype(str).str.strip().unique().tolist()
+                            )
+
+                            if not other_flights:
+                                st.info("אין חריצים פנויים מתאימים בטיסות אחרות.")
+                            else:
+                                target_flight = st.selectbox(
+                                    "בחר טיסה יעד:",
+                                    options=other_flights,
+                                    key=f"swap_target_{task_idx}",
+                                )
+
+                        if st.button("✅ אשר החלפה", key=f"swap_confirm_{task_idx}"):
+                            displaced_action = "move" if action == "העבר לחריץ פנוי בטיסה אחרת" else "unassign"
+                            updated = do_swap(
+                                st.session_state["schedule_df"],
+                                task_idx,
+                                selected_new,
+                                displaced_action,
+                                target_flight,
+                            )
+                            st.session_state["schedule_df"] = updated
+                            st.success(f"✅ {selected_new} שובץ במקום {worker_raw}.")
+                            st.rerun()
+
+    management_title = str(row.get("כותרת ניהול", "ניהול"))
+    agents_title     = str(row.get("כותרת דיילים", "דיילים"))
+
+    with c1:
+        st.markdown(f'<div class="panel-title">👔 {safe_html(management_title)}</div>', unsafe_allow_html=True)
+        left_lines = [l for l in left_text.split("\n") if l.strip()] if left_text and left_text != "nan" else []
+        if left_lines:
+            render_lines_with_swap(left_lines)
+        else:
+            render_line("אין שיבוץ")
+
+    with c2:
+        st.markdown(f'<div class="panel-title">🧍 {safe_html(agents_title)}</div>', unsafe_allow_html=True)
+        right_lines = [l for l in right_text.split("\n") if l.strip()] if right_text and right_text != "nan" else []
+        if right_lines:
+            render_lines_with_swap(right_lines)
+        else:
+            render_line("אין שיבוץ")
+
+
+
 
 def to_excel_bytes(output_df, workload_df, schedule_df, continuity_df=None):
     output = io.BytesIO()
@@ -1762,17 +2007,38 @@ m2.metric("עובדים", len(employees_df))
 m3.metric("יעדי TSA", edited_flights["יעד"].isin(list(USA_TSA_DESTS)).sum())
 m4.metric("עובדי טרייני רצ", (employees_df["טרייני רצ"].astype(str).str.strip() == "כן").sum() if "טרייני רצ" in employees_df.columns else 0)
 
+
+def recompute_from_schedule(schedule_df, flights_df, employees_df):
+    labeled_df    = build_next_task_labels(schedule_df, employees_df)
+    workload_df   = build_workload(schedule_df, employees_df)
+    continuity_df = build_counter_continuity_rows(labeled_df, employees_df)
+    output_df     = build_output_table(flights_df, labeled_df, employees_df)
+    return labeled_df, workload_df, continuity_df, output_df
+
+
+# ── Build button ──────────────────────────────────────────────────────────────
 if st.button("🚀 בנה שיבוץ", use_container_width=True):
     try:
         schedule_df = build_schedule(edited_flights, employees_df)
-        labeled_df = build_next_task_labels(schedule_df, employees_df)
-        workload_df = build_workload(schedule_df, employees_df)
-        continuity_df = build_counter_continuity_rows(labeled_df, employees_df)
-        output_df = build_output_table(edited_flights, labeled_df, employees_df)
-
-        missing = schedule_df[schedule_df["עובד"].astype(str).str.contains("❌", na=False)]
-
+        st.session_state["schedule_df"]    = schedule_df.copy()
+        st.session_state["flights_snap"]   = edited_flights.copy()
+        st.session_state["employees_snap"] = employees_df.copy()
         st.success("השיבוץ נבנה בהצלחה.")
+    except Exception as exc:
+        st.error("הייתה שגיאה בבניית השיבוץ.")
+        st.exception(exc)
+
+# ── Display (runs every rerun as long as session_state has data) ───────────────
+if "schedule_df" in st.session_state:
+    try:
+        live_schedule  = st.session_state["schedule_df"]
+        live_flights   = st.session_state["flights_snap"]
+        live_employees = st.session_state["employees_snap"]
+
+        labeled_df, workload_df, continuity_df, output_df = recompute_from_schedule(
+            live_schedule, live_flights, live_employees
+        )
+        missing = live_schedule[live_schedule["עובד"].astype(str).str.contains("❌", na=False)]
 
         tab_schedule, tab_missing, tab_workload, tab_continuity, tab_raw = st.tabs(
             ["✈️ לוח מבצעים", "❌ חוסרים", "📊 עומס עובדים", "🧭 רצף אזורי", "🧾 פירוט גולמי"]
@@ -1799,7 +2065,11 @@ if st.button("🚀 בנה שיבוץ", use_container_width=True):
                 display_df = display_df[mask]
 
             for _, row in display_df.iterrows():
-                render_flight_card(row)
+                render_flight_card_with_swap(
+                    row,
+                    st.session_state["schedule_df"],
+                    st.session_state["employees_snap"],
+                )
 
         with tab_missing:
             st.subheader("❌ חוסרים")
@@ -1833,5 +2103,5 @@ if st.button("🚀 בנה שיבוץ", use_container_width=True):
         )
 
     except Exception as exc:
-        st.error("הייתה שגיאה בבניית השיבוץ.")
+        st.error("הייתה שגיאה בהצגת השיבוץ.")
         st.exception(exc)
