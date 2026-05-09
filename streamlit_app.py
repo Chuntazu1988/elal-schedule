@@ -405,7 +405,7 @@ with st.expander("🕒 מי עובד היום?"):
     _today_mask      = employees_df["_name_key"].isin(_today_keys)
     _today_employees = employees_df[_today_mask].copy()
 
-    # Sort: primary = start time from 02:00, secondary = end time
+    # Sort: primary = start from 02:00, secondary = end time
     def _start_sort(s):
         s = str(s).strip()
         if not is_time_text(s): return 9999
@@ -434,6 +434,7 @@ with st.expander("🕒 מי עובד היום?"):
         _display_df,
         use_container_width=True,
         num_rows="fixed",
+        hide_index=True,
         key="shift_hours_editor",
         column_config={
             "הורדה ממשמרת": st.column_config.SelectboxColumn(
@@ -449,7 +450,7 @@ with st.expander("🕒 מי עובד היום?"):
         },
     )
 
-    # Sync edits → removed_employees state + employees_df shift times
+    # Sync edits → removal state + shift times in employees_df
     if _edited is not None:
         _new_removed = {}
         for _, _r in _edited.iterrows():
@@ -463,24 +464,114 @@ with st.expander("🕒 מי עובד היום?"):
                 employees_df.loc[_m, "סוף משמרת"]   = _r.get("סוף משמרת",   "")
         st.session_state["removed_employees"] = _new_removed
 
-    # Filter removed from workforce for downstream scheduling
+    # ── Save button (always available) ────────────────────────────────────────
+    if st.button("💾 שמור שעות משמרת", use_container_width=True, key="save_shift_hours"):
+        if _edited is not None and "employees_snap" in st.session_state:
+            for _, _r in _edited.iterrows():
+                _n = _r["שם"]
+                _m = st.session_state["employees_snap"]["שם"] == _n
+                if _m.any():
+                    st.session_state["employees_snap"].loc[_m, "תחילת משמרת"] = _r.get("תחילת משמרת", "")
+                    st.session_state["employees_snap"].loc[_m, "סוף משמרת"]   = _r.get("סוף משמרת",   "")
+        st.success("✅ שעות המשמרת נשמרו בהצלחה")
+
+    # ── Removed employees section ─────────────────────────────────────────────
     _removed_names = set(st.session_state["removed_employees"].keys())
     if _removed_names:
         employees_df = employees_df[~employees_df["שם"].isin(_removed_names)].copy()
-        _rem_list = "، ".join(
-            f"{n} ({r})" for n, r in st.session_state["removed_employees"].items()
+
+        st.markdown("---")
+        st.markdown(
+            "**עובדים שהוסרו ממשמרת:** " +
+            " | ".join(
+                f"🔴 {n} ({r})"
+                for n, r in st.session_state["removed_employees"].items()
+            )
         )
-        st.warning(f"⚠️ הוסרו ממשמרת: {_rem_list}")
-        if st.button("🔄 בצע שיבוץ מחדש", use_container_width=True, type="primary", key="recompute_after_removal"):
-            if "schedule_df" in st.session_state:
-                _sched = st.session_state["schedule_df"].copy()
-                for _rname in _removed_names:
-                    _rmask = _sched["עובד"].astype(str) == _rname
-                    if _rmask.any():
-                        _sched.loc[_rmask, "עובד"] = "❌ (חסר)"
-                st.session_state["schedule_df"]    = _sched
+
+        if "schedule_df" in st.session_state:
+            _sched = st.session_state["schedule_df"]
+
+            # ── Reassignment UI: per removed employee per task ────────────────
+            _any_tasks = False
+            for _rname in sorted(_removed_names):
+                _tasks = _sched[_sched["עובד"].astype(str) == _rname].copy()
+                if _tasks.empty:
+                    continue
+                _any_tasks = True
+
+                st.markdown(
+                    f'<div style="background:#fff3f3;border-right:4px solid #e74c3c;'
+                    f'border-radius:6px;padding:8px 12px;margin:8px 0 4px 0;'
+                    f'font-weight:700;direction:rtl;">✈️ {safe_html(_rname)}</div>',
+                    unsafe_allow_html=True,
+                )
+
+                for _tidx, _trow in _tasks.iterrows():
+                    _flight   = str(_trow.get("טיסה", "")).replace("LY", "").strip()
+                    _role_base = str(_trow.get("תפקיד בסיס", ""))
+                    _role     = normalize_role_label(_role_base)
+                    _t_start  = str(_trow.get("התחלה", ""))
+                    _t_end    = str(_trow.get("סיום",   ""))
+
+                    _candidates = get_qualified_candidates_for_swap(
+                        _sched, employees_df,
+                        str(_trow.get("טיסה", "")), _role_base, _tidx
+                    )
+                    _opts = ["— ללא החלפה (יישאר חוסר) —"] + (_candidates or [])
+
+                    _ci, _cs = st.columns([2, 3])
+                    _ci.markdown(
+                        f'<div style="direction:rtl;padding-top:7px;font-size:13px;">'
+                        f'<b>{safe_html(_flight)}</b> | {safe_html(_role)} | {safe_html(_t_start)}–{safe_html(_t_end)}</div>',
+                        unsafe_allow_html=True,
+                    )
+                    with _cs:
+                        st.selectbox(
+                            "", _opts,
+                            key=f"repl_{_tidx}",
+                            label_visibility="collapsed",
+                        )
+
+            if not _any_tasks:
+                st.info("העובד שהוסר לא היה משובץ לאף טיסה.")
+
+            # ── Action buttons ────────────────────────────────────────────────
+            st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+            _col1, _col2 = st.columns(2)
+
+            with _col1:
+                if st.button("🔄 בצע שיבוץ מחדש", use_container_width=True, type="primary", key="do_reassign"):
+                    _new_sched = _sched.copy()
+                    for _rname in _removed_names:
+                        _tasks = _new_sched[_new_sched["עובד"].astype(str) == _rname]
+                        for _tidx, _ in _tasks.iterrows():
+                            _choice = st.session_state.get(f"repl_{_tidx}", "")
+                            if _choice and "ללא החלפה" not in _choice:
+                                _new_sched.at[_tidx, "עובד"] = _choice
+                            else:
+                                _new_sched.at[_tidx, "עובד"] = "❌ (חסר)"
+                    st.session_state["schedule_df"]    = _new_sched
+                    st.session_state["employees_snap"] = employees_df.copy()
+                    st.rerun()
+
+            with _col2:
+                if st.button("💾 שמור ללא שיבוץ מחדש", use_container_width=True, key="save_no_reassign"):
+                    _new_sched = _sched.copy()
+                    for _rname in _removed_names:
+                        _rmask = _new_sched["עובד"].astype(str) == _rname
+                        if _rmask.any():
+                            _new_sched.loc[_rmask, "עובד"] = "❌ (חסר)"
+                    st.session_state["schedule_df"]    = _new_sched
+                    st.session_state["employees_snap"] = employees_df.copy()
+                    st.rerun()
+
+        else:
+            # No schedule built yet
+            st.info("💡 בנה שיבוץ תחילה כדי לראות את הטיסות המשובצות ולבחור מחליפים.")
+            if st.button("💾 שמור ללא שיבוץ מחדש", use_container_width=True, key="save_no_reassign_nosched"):
                 st.session_state["employees_snap"] = employees_df.copy()
-            st.rerun()
+                st.rerun()
 
 st.markdown(
     '<div class="ops-rtl"><h3>🛫 טיסות מהסידור היומי</h3>'
