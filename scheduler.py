@@ -16,6 +16,18 @@ from helpers import (
 
 
 # =========================
+# NAME LOOKUP HELPER
+# =========================
+
+def find_emp_row(employees_df, worker_name):
+    """חיפוש עובד לפי name_key — עמיד בפני שמות בסדר הפוך (שחר פרגסליך = פרגסליך שחר)."""
+    key = name_key(clean_text(worker_name))
+    mask = employees_df["_name_key"].apply(lambda k: name_key(str(k)) == key)
+    matched = employees_df[mask]
+    return matched
+
+
+# =========================
 # FLIGHT RULES
 # =========================
 
@@ -451,7 +463,7 @@ def has_required_mentor(assignments_for_flight, employees_df, training_type):
     required_col = "מסמיך רצים" if training_type == "הסמכה" else "חונך רצים"
     for task in assignments_for_flight:
         if str(task["תפקיד"]).startswith("ראש צוות") and "❌" not in str(task["עובד"]):
-            emp = employees_df[employees_df["שם"] == task["עובד"]]
+            emp = find_emp_row(employees_df, task["עובד"])
             if not emp.empty and str(emp.iloc[0].get(required_col, "")).strip() == "כן":
                 return True
     return False
@@ -474,7 +486,7 @@ def flight_has_mentor_teamlead(assignments_for_flight, employees_df, training_ty
         worker = str(task.get("עובד", ""))
         if "❌" in worker:
             continue
-        emp = employees_df[employees_df["שם"] == worker]
+        emp = find_emp_row(employees_df, worker)
         if emp.empty:
             continue
         row = emp.iloc[0]
@@ -491,21 +503,7 @@ def trainee_already_used(assignments):
     return False
 
 
-def build_schedule(flights_df, employees_df, current_time=None):
-    """
-    בונה שיבוץ לכל הטיסות.
-
-    current_time: datetime עם timezone (ישראל).
-                  אם הועבר — טיסות שהמריאו לפני יותר מ-15 דקות מדולגות.
-    """
-    # חישוב דקות נוכחיות פעם אחת מחוץ ללולאה
-    current_minutes = None
-    if current_time is not None:
-        try:
-            current_minutes = current_time.hour * 60 + current_time.minute
-        except Exception:
-            current_minutes = None
-
+def build_schedule(flights_df, employees_df):
     assignments = []
     flights_df = flights_df.copy()
     flights_df["_flight_key"] = flights_df["טיסה"].apply(
@@ -516,18 +514,6 @@ def build_schedule(flights_df, employees_df, current_time=None):
     for _, flight in flights_df.iterrows():
         if clean_text(flight.get("המראה", "")) == "":
             continue
-
-        # ── דילוג על טיסות שכבר המריאו (מעל 15 דקות אחורה) ──────────────────
-        if current_minutes is not None:
-            try:
-                dep_m = time_to_minutes(clean_text(flight["המראה"]))
-                diff  = dep_m - current_minutes
-                if diff < -720:
-                    diff += 1440   # תיקון חציית חצות
-                if diff < -15:
-                    continue       # טיסה שעברה — לא נשבץ
-            except Exception:
-                pass  # שעה לא תקינה — כוללים
 
         req = get_requirements(flight)
         used_on_flight = set()
@@ -743,7 +729,7 @@ def upgrade_teamleads(assignments_df, employees_df):
             promoted_task = None
             for t in tl_as_agent:
                 worker_name = t["עובד"]
-                emp_row = employees_df[employees_df["שם"] == worker_name]
+                emp_row = find_emp_row(employees_df, worker_name)
                 if emp_row.empty:
                     continue
                 if str(emp_row.iloc[0].get("ראש צוות","")).strip() == "כן":
