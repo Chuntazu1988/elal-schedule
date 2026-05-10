@@ -1178,20 +1178,58 @@ def _filter_flights_by_time(df, time_from, time_to):
     return df[df["המראה"].apply(_keep)].copy()
 
 
+# ── טיסות שנוספו מ-FIDS ──────────────────────────────────────────────────────
+_fids_preview = st.session_state.get("fids_added_flights", [])
+if _fids_preview:
+    st.markdown(
+        '<div style="direction:rtl;background:#f0fdf4;border:1px solid #86efac;'
+        'border-radius:10px;padding:8px 14px;margin-bottom:8px;font-size:13px;color:#14532d;">'
+        '✅ <strong>טיסות שנוספו מ-FIDS ויכללו בשיבוץ:</strong> '
+        + " | ".join([f'<code>{f["טיסה"]}</code> {f.get("יעד","")} {f.get("המראה","")}' for f in _fids_preview])
+        + '</div>',
+        unsafe_allow_html=True,
+    )
+
 # ── Build button ──────────────────────────────────────────────────────────────
 if st.button("🚀 בנה שיבוץ", use_container_width=True):
     try:
+        # בסיס: טיסות מהסידור היומי
+        _all_flights = flights_editor_df.copy()
+
+        # הוספת טיסות שנוספו ידנית מ-FIDS (מובטח — ישירות מ-session_state)
+        _fids_extra = st.session_state.get("fids_added_flights", [])
+        if _fids_extra:
+            _extra_df = pd.DataFrame(_fids_extra)
+            for _ec in _all_flights.columns:
+                if _ec not in _extra_df.columns:
+                    _extra_df[_ec] = ""
+            # מניעת כפילויות
+            _exist_keys = set(_all_flights["טיסה"].astype(str).str.upper().str.replace(" ", ""))
+            _extra_df = _extra_df[
+                ~_extra_df["טיסה"].astype(str).str.upper().str.replace(" ", "").isin(_exist_keys)
+            ]
+            if not _extra_df.empty:
+                _all_flights = pd.concat(
+                    [_all_flights, _extra_df[_all_flights.columns]],
+                    ignore_index=True,
+                )
+
+        # סינון לפי טווח שעות (אם הוגדר)
         _tf = st.session_state.get("sched_time_from", "")
         _tt = st.session_state.get("sched_time_to",   "")
-        _flights_to_schedule = _filter_flights_by_time(flights_editor_df, _tf, _tt)
-        if len(_flights_to_schedule) < len(flights_editor_df):
-            st.info(f"🕐 משבץ {len(_flights_to_schedule)} טיסות בטווח {_tf or 'תחילת יום'} – {_tt or 'סוף יום'} (מתוך {len(flights_editor_df)} סה״כ)")
+        _flights_to_schedule = _filter_flights_by_time(_all_flights, _tf, _tt)
+
+        if _fids_extra:
+            st.info(f"✈️ {len(_fids_extra)} טיסות נוספו מ-FIDS לשיבוץ")
+        if len(_flights_to_schedule) < len(_all_flights):
+            st.info(f"🕐 משבץ {len(_flights_to_schedule)} טיסות בטווח {_tf or 'תחילת יום'} – {_tt or 'סוף יום'}")
+
         schedule_df = build_schedule(_flights_to_schedule, employees_df)
         schedule_df = upgrade_teamleads(schedule_df, employees_df)
         st.session_state["schedule_df"]    = schedule_df.copy()
         st.session_state["flights_snap"]   = _flights_to_schedule.copy()
         st.session_state["employees_snap"] = employees_df.copy()
-        st.success("השיבוץ נבנה בהצלחה.")
+        st.success(f"השיבוץ נבנה בהצלחה — {len(_flights_to_schedule)} טיסות.")
     except Exception as exc:
         st.error("הייתה שגיאה בבניית השיבוץ.")
         st.exception(exc)
