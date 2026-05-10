@@ -34,6 +34,7 @@ from display import (
     render_flight_card, render_flight_card_with_swap,
     to_excel_bytes,
 )
+from file_diff import store_snapshot, show_file_diff
 
 # =========================
 # PAGE CONFIG
@@ -218,6 +219,10 @@ with st.sidebar:
     sidebar_confirm = st.button("✅ אשר וטען קבצים", use_container_width=True, key="sidebar_confirm")
 
 if sidebar_confirm:
+    # ── שמור גרסה קודמת לפני החלפת הקבצים ────────────────────────────────
+    store_snapshot("daily")
+    store_snapshot("employees")
+    # ─────────────────────────────────────────────────────────────────────
     if sidebar_daily:
         st.session_state["daily_file_obj"] = sidebar_daily
     if sidebar_emp:
@@ -402,6 +407,11 @@ try:
     shift_map = build_shift_map_from_excel(daily_file)
     daily_file.seek(0)
     employees_df = apply_shift_map_to_employees(employees_df, shift_map)
+
+    # ── הצג שינויים ביחס לגרסה הקודמת (אם הועלה קובץ חדש) ───────────────
+    show_file_diff("📋 שינויים בסידור יומי",  "daily",     flights_df)
+    show_file_diff("👥 שינויים בקובץ עובדים", "employees", employees_df)
+    # ─────────────────────────────────────────────────────────────────────
 except Exception as exc:
     st.error("לא הצלחתי לקרוא את הקבצים.")
     st.exception(exc)
