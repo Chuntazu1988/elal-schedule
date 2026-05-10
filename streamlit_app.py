@@ -634,7 +634,9 @@ flights_editor_df = flights_df.drop(columns=["טרייני רצ"], errors="ignor
 # Merge saved edits from previous session
 if "saved_flight_edits" in st.session_state:
     saved = st.session_state["saved_flight_edits"]
-    for col in ["גייט", "רישוי", "נוסעים"]:
+
+    # 1. עדכון שדות בשורות קיימות
+    for col in ["גייט", "רישוי", "נוסעים", "ETD"]:
         if col in saved.columns and col in flights_editor_df.columns:
             merge = saved[["טיסה", col]].dropna(subset=[col])
             merge = merge[merge[col].astype(str).str.strip() != ""]
@@ -642,6 +644,22 @@ if "saved_flight_edits" in st.session_state:
                 mask = flights_editor_df["טיסה"] == mrow["טיסה"]
                 if mask.any():
                     flights_editor_df.loc[mask, col] = mrow[col]
+
+    # 2. הוספת שורות חדשות שנוספו ידנית (למשל מכפתור "הוסף מ-FIDS")
+    _existing_keys = set(
+        flights_editor_df["טיסה"].astype(str).str.upper().str.replace(r"\s+", "", regex=True)
+    )
+    _new_rows = saved[
+        ~saved["טיסה"].astype(str).str.upper().str.replace(r"\s+", "", regex=True).isin(_existing_keys)
+    ].copy()
+    if not _new_rows.empty:
+        for col in flights_editor_df.columns:
+            if col not in _new_rows.columns:
+                _new_rows[col] = ""
+        flights_editor_df = pd.concat(
+            [flights_editor_df, _new_rows[flights_editor_df.columns]],
+            ignore_index=True,
+        )
 
 
 def _build_display_df(df):
@@ -1092,7 +1110,6 @@ if "_fids_combined_raw" in st.session_state:
                                                 _new_row_df[_col] = ""
                                         _base = pd.concat([_base, _new_row_df[_base.columns]], ignore_index=True)
                                         st.session_state["saved_flight_edits"] = _base
-                                        st.session_state["fids_applied"] = False  # אפשר החלת FIDS מחדש
                                     st.session_state.setdefault("fids_dismissed", set()).add(_fk_key)
                                     st.rerun()
                             with _col_del:
