@@ -1003,14 +1003,38 @@ if "_fids_combined_raw" in st.session_state:
                                  use_container_width=True, hide_index=True)
 
                 if _only_sched:
-                    st.markdown(
-                        '<div style="direction:rtl;font-weight:800;font-size:14px;'
-                        'color:#b45309;margin:10px 0 4px;">🟡 טיסות בסידור שאינן ב-FIDS</div>',
-                        unsafe_allow_html=True,
-                    )
-                    _miss_cols = [c for c in ["טיסה", "יעד", "המראה", "בורדינג"] if c in _sched_cmp.columns]
-                    st.dataframe(_sched_cmp[_sched_cmp["_fk"].isin(_only_sched)][_miss_cols],
-                                 use_container_width=True, hide_index=True)
+                    # הפרד טיסות לילה (המראה לפני 02:00 = יום למחרת) מטיסות אמיתיות חסרות
+                    def _is_next_day(row):
+                        dep = str(row.get("המראה", ""))
+                        m = re.search(r"(\d{1,2}):(\d{2})", dep)
+                        if not m: return False
+                        return (int(m.group(1)), int(m.group(2))) < (2, 0)
+
+                    _only_sched_df    = _sched_cmp[_sched_cmp["_fk"].isin(_only_sched)]
+                    _night_flights    = _only_sched_df[_only_sched_df.apply(_is_next_day, axis=1)]
+                    _real_missing     = _only_sched_df[~_only_sched_df.apply(_is_next_day, axis=1)]
+                    _miss_cols        = [c for c in ["טיסה", "יעד", "המראה", "בורדינג"] if c in _sched_cmp.columns]
+
+                    # עדכן את ה-metric לא לכלול טיסות לילה
+                    _c2.metric("🟡 חסרות ב-FIDS", len(_real_missing))
+
+                    if not _real_missing.empty:
+                        st.markdown(
+                            '<div style="direction:rtl;font-weight:800;font-size:14px;'
+                            'color:#b45309;margin:10px 0 4px;">🟡 טיסות בסידור שאינן ב-FIDS</div>',
+                            unsafe_allow_html=True,
+                        )
+                        st.dataframe(_real_missing[_miss_cols],
+                                     use_container_width=True, hide_index=True)
+
+                    if not _night_flights.empty:
+                        st.markdown(
+                            '<div style="direction:rtl;font-weight:800;font-size:14px;'
+                            'color:#6366f1;margin:10px 0 4px;">🌙 טיסות לילה — המראה ביום המחרת (לא ב-FIDS של היום)</div>',
+                            unsafe_allow_html=True,
+                        )
+                        st.dataframe(_night_flights[_miss_cols],
+                                     use_container_width=True, hide_index=True)
 
                 if _only_fids:
                     _dismissed   = st.session_state.get("fids_dismissed", set())
