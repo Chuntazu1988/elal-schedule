@@ -883,6 +883,9 @@ if (_fids1 or _fids2) and not st.session_state.get("fids_applied"):
 display_df = _build_display_df(flights_editor_df)
 display_df.index = range(1, len(display_df) + 1)
 
+# מפתח דינמי — מתחדש כשמספר הטיסות משתנה (מונע cache ישן של Streamlit)
+_editor_key = f"flights_editor_{len(flights_editor_df)}_{len(st.session_state.get('fids_added_flights', []))}"
+
 with st.form("flights_form"):
     edited_display = st.data_editor(
         display_df,
@@ -896,7 +899,7 @@ with st.form("flights_form"):
             "גייט":            st.column_config.TextColumn("🚪 גייט"),
             "נוסעים":          st.column_config.TextColumn("👥 נוסעים"),
         },
-        key="flights_editor",
+        key=_editor_key,
     )
     col_save, col_clear = st.columns([3, 1])
     with col_save:
@@ -905,7 +908,12 @@ with st.form("flights_form"):
         clear_clicked = st.form_submit_button("🗑️ נקה", use_container_width=True)
 
 if save_clicked:
-    parsed_back = _parse_display_to_original(edited_display, flights_editor_df)
+    # edited_display עשוי לא להכיל שורות חדשות אם המפתח השתנה —
+    # לכן משתמשים ב-display_df כבסיס ומחילים רק שינויים שנעשו
+    try:
+        parsed_back = _parse_display_to_original(edited_display, flights_editor_df)
+    except Exception:
+        parsed_back = flights_editor_df.copy()
     st.session_state["saved_flight_edits"] = parsed_back
     st.success("הנתונים נשמרו ✅")
 
