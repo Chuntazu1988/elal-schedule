@@ -420,6 +420,8 @@ def normalize_employees(df):
         return s
     df["זמינות"] = df["זמינות"].apply(clean_avail)
 
-    df = df.drop_duplicates(subset=["שם"], keep="first").reset_index(drop=True)
+    # נרמל כפילויות לפי name_key — כך "שחר פרגסליך" ו"פרגסליך שחר" מזוהים כאותו עובד
+    df["_name_key"] = df["שם"].apply(name_key)
+    df = df.drop_duplicates(subset=["_name_key"], keep="first").reset_index(drop=True)
 
     return df
