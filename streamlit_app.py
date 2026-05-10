@@ -631,54 +631,36 @@ st.markdown(
 
 flights_editor_df = flights_df.drop(columns=["טרייני רצ"], errors="ignore").copy()
 
-# Merge saved edits from previous session
+# ── שלב 1: מיזוג עריכות שדות שמורות (גייט/רישוי/נוסעים/ETD) ──────────────────
 if "saved_flight_edits" in st.session_state:
-    saved = st.session_state["saved_flight_edits"]
+    _saved = st.session_state["saved_flight_edits"]
+    for _col in ["גייט", "רישוי", "נוסעים", "ETD"]:
+        if _col not in _saved.columns or _col not in flights_editor_df.columns:
+            continue
+        _merge = _saved[["טיסה", _col]].dropna(subset=[_col])
+        _merge = _merge[_merge[_col].astype(str).str.strip() != ""]
+        for _, _mrow in _merge.iterrows():
+            _mask = flights_editor_df["טיסה"] == _mrow["טיסה"]
+            if _mask.any():
+                flights_editor_df.loc[_mask, _col] = _mrow[_col]
 
-    # 1. עדכון שדות בשורות קיימות
-    for col in ["גייט", "רישוי", "נוסעים", "ETD"]:
-        if col in saved.columns and col in flights_editor_df.columns:
-            merge = saved[["טיסה", col]].dropna(subset=[col])
-            merge = merge[merge[col].astype(str).str.strip() != ""]
-            for _, mrow in merge.iterrows():
-                mask = flights_editor_df["טיסה"] == mrow["טיסה"]
-                if mask.any():
-                    flights_editor_df.loc[mask, col] = mrow[col]
-
-    # 2. הוספת שורות חדשות שנוספו ידנית (למשל מכפתור "הוסף מ-FIDS")
-    _existing_keys = set(
-        flights_editor_df["טיסה"].astype(str).str.upper().str.replace(r"\s+", "", regex=True)
-    )
-    _new_rows = saved[
-        ~saved["טיסה"].astype(str).str.upper().str.replace(r"\s+", "", regex=True).isin(_existing_keys)
-    ].copy()
-    if not _new_rows.empty:
-        for col in flights_editor_df.columns:
-            if col not in _new_rows.columns:
-                _new_rows[col] = ""
-        flights_editor_df = pd.concat(
-            [flights_editor_df, _new_rows[flights_editor_df.columns]],
-            ignore_index=True,
-        )
-
-
-    # 3. הוספת טיסות שנוספו ידנית מ-FIDS (רשימה ייעודית, לא תידרס ע"י שמירת עורך)
-    _fids_added = st.session_state.get("fids_added_flights", [])
-    if _fids_added:
-        _existing_keys2 = set(
-            flights_editor_df["טיסה"].astype(str).str.upper().str.replace(r"\s+", "", regex=True)
-        )
-        for _fa in _fids_added:
-            if _fa["טיסה"].upper().replace(" ", "") not in _existing_keys2:
-                _fa_row = pd.DataFrame([_fa])
-                for _c in flights_editor_df.columns:
-                    if _c not in _fa_row.columns:
-                        _fa_row[_c] = ""
-                flights_editor_df = pd.concat(
-                    [flights_editor_df, _fa_row[flights_editor_df.columns]],
-                    ignore_index=True,
-                )
-                _existing_keys2.add(_fa["טיסה"].upper().replace(" ", ""))
+# ── שלב 2: הוספת טיסות שנוספו ידנית מ-FIDS ─────────────────────────────────
+# רשימה ייעודית שאינה נדרסת ע"י שמירת עורך או החלת FIDS
+_fids_added_list = st.session_state.get("fids_added_flights", [])
+if _fids_added_list:
+    _ex = set(flights_editor_df["טיסה"].astype(str).str.upper().str.replace(" ", ""))
+    for _fa in _fids_added_list:
+        _fa_key = str(_fa.get("טיסה", "")).upper().replace(" ", "")
+        if _fa_key and _fa_key not in _ex:
+            _fa_row = pd.DataFrame([_fa])
+            for _c in flights_editor_df.columns:
+                if _c not in _fa_row.columns:
+                    _fa_row[_c] = ""
+            flights_editor_df = pd.concat(
+                [flights_editor_df, _fa_row[flights_editor_df.columns]],
+                ignore_index=True,
+            )
+            _ex.add(_fa_key)
 
 
 def _build_display_df(df):
@@ -917,7 +899,7 @@ with st.form("flights_form"):
             "גייט":            st.column_config.TextColumn("🚪 גייט"),
             "נוסעים":          st.column_config.TextColumn("👥 נוסעים"),
         },
-        key="flights_editor",
+        key=f"flights_editor_{st.session_state.get('flights_editor_v', 0)}",
     )
     col_save, col_clear = st.columns([3, 1])
     with col_save:
@@ -937,7 +919,8 @@ if clear_clicked:
     st.rerun()
 
 m1, m2, m3, m4 = st.columns(4)
-m1.metric("טיסות", len(flights_editor_df))
+_fids_added_count = len(st.session_state.get("fids_added_flights", []))
+m1.metric("טיסות", len(flights_editor_df), delta=f"+{_fids_added_count} מ-FIDS" if _fids_added_count else None)
 m2.metric("עובדים", len(employees_df))
 m3.metric("יעדי TSA", flights_editor_df["יעד"].isin(list(USA_TSA_DESTS)).sum())
 m4.metric(
@@ -1124,13 +1107,12 @@ if "_fids_combined_raw" in st.session_state:
                                     if _ly_num.upper().replace(" ","") not in _already:
                                         _added.append(_new_flight)
                                     st.session_state.setdefault("fids_dismissed", set()).add(_fk_key)
-                                    # נקה cache של data editor כדי שיתרענן עם השורה החדשה
-                                    st.session_state.pop("flights_editor", None)
+                                    # העלאת גרסת editor כדי לכפות אתחול מחדש של הטבלה
+                                    st.session_state["flights_editor_v"] = st.session_state.get("flights_editor_v", 0) + 1
                                     st.rerun()
                             with _col_del:
                                 if st.button("🗑", key=f"fids_del_{_btn_key}_{_oi}", help="הסתר טיסה זו", use_container_width=True):
                                     st.session_state.setdefault("fids_dismissed", set()).add(_fk_key)
-                                    st.session_state.pop("flights_editor", None)
                                     st.rerun()
 
 
