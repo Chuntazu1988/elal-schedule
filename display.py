@@ -6,7 +6,7 @@ import streamlit as st
 from helpers import (
     clean_text, safe_html, normalize_role_label, gender_role_label,
     is_time_text, to_datetime_time, time_to_minutes, minutes_between,
-    short_flight_number, flight_key,
+    short_flight_number, flight_key, name_key, name_key_reversed,
     classify_shift, shift_length, break_label_for_employee, required_break,
     return_text_by_shift, break_deadline_before_flight,
     employee_shift_text, gap_minutes_to_next, next_task_plain_text,
@@ -222,7 +222,25 @@ def build_workload(result_df, employees_df):
         return pd.DataFrame(columns=["עובד", "משימות", "דקות עבודה", "הפסקה נדרשת", "סה״כ כולל הפסקות"])
 
     timed = result_df[result_df["התחלה"].astype(str).str.strip() != ""].copy()
-    timed["עובד"] = timed["עובד"].apply(lambda x: clean_text(x) if not pd.isna(x) else x)
+
+    # בנה מפת נורמליזציה: name_key(וריאציה) → שם קנוני מ-employees_df
+    # כך "שחר פרגסליך" ו"פרגסליך שחר" יאוחדו לאותו שם
+    name_canon: dict = {}
+    for _, emp in employees_df.iterrows():
+        canon = clean_text(emp.get("שם", ""))
+        if not canon:
+            continue
+        name_canon[name_key(canon)] = canon
+        name_canon[name_key_reversed(canon)] = canon
+
+    def canonicalize(w):
+        w = clean_text(str(w))
+        if "❌" in w:
+            return w
+        return name_canon.get(name_key(w), w)
+
+    timed["עובד"] = timed["עובד"].apply(canonicalize)
+
     real_workers = sorted([
         worker for worker in timed["עובד"].dropna().unique()
         if "❌" not in str(worker)
