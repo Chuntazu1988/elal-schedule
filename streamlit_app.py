@@ -1205,7 +1205,7 @@ if st.session_state.get("show_time_form", False):
 
     tf_go, tf_cancel = st.columns(2)
     with tf_go:
-        if st.button("✅ צור שיבוץ בטווח זה", use_container_width=True, key="tf_confirm"):
+        if st.button("✅ בנה שיבוץ אוטומטי בטווח זה", use_container_width=True, key="tf_confirm"):
             try:
                 from datetime import datetime as _dt
                 def _hm(s):
@@ -1213,42 +1213,26 @@ if st.session_state.get("show_time_form", False):
                 t_from = _hm(time_from)
                 t_to   = _hm(time_to)
 
-                assignments = []
-                for _, flight in flights_editor_df.iterrows():
-                    if clean_text(flight.get("המראה", "")) == "":
-                        continue
-                    req = get_requirements(flight)
-                    for role in ROLE_ORDER:
-                        amount = req.get(role, 0)
-                        for i in range(amount):
-                            start = role_start_time(flight, role)
-                            end   = role_end_time(flight)
-                            # כלול רק אם הטווח חופף לטווח שנבחר
-                            if end < t_from or start > t_to:
-                                continue
-                            assignments.append({
-                                "טיסה":       flight["טיסה"],
-                                "יעד":        flight["יעד"],
-                                "תפקיד":      role if amount == 1 else f"{role} {i+1}",
-                                "תפקיד בסיס": role,
-                                "עובד":       f"❌ חסר {role}",
-                                "התחלה":      start.strftime("%H:%M"),
-                                "סיום":       end.strftime("%H:%M"),
-                                "_gate":      clean_text(flight.get("גייט", "")),
-                                "סיבה":       "שיבוץ ידני לפי זמן",
-                            })
-                if not assignments:
+                # סנן רק טיסות שהמראה שלהן בטווח הזמן
+                filtered_flights = flights_editor_df[
+                    flights_editor_df["המראה"].apply(
+                        lambda v: is_time_text(str(v)) and t_from <= _hm(str(v)) <= t_to
+                    )
+                ].copy()
+
+                if filtered_flights.empty:
                     st.warning("לא נמצאו טיסות בטווח הזמן שנבחר.")
                 else:
-                    schedule_df = pd.DataFrame(assignments)
+                    schedule_df = build_schedule(filtered_flights, employees_df)
+                    schedule_df = upgrade_teamleads(schedule_df, employees_df)
                     st.session_state["schedule_df"]    = schedule_df.copy()
-                    st.session_state["flights_snap"]   = flights_editor_df.copy()
+                    st.session_state["flights_snap"]   = filtered_flights.copy()
                     st.session_state["employees_snap"] = employees_df.copy()
                     st.session_state["show_time_form"] = False
-                    st.success(f"נוצר שלד ל-{len(assignments)} חריצים בין {time_from}–{time_to}.")
+                    st.success(f"שיבוץ אוטומטי נבנה עבור {len(filtered_flights)} טיסות בין {time_from}–{time_to}.")
                     st.rerun()
             except Exception as exc:
-                st.error("שגיאה ביצירת הסידור.")
+                st.error("שגיאה בבניית השיבוץ.")
                 st.exception(exc)
     with tf_cancel:
         if st.button("✖ ביטול", use_container_width=True, key="tf_cancel"):
