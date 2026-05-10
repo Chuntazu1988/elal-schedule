@@ -631,17 +631,14 @@ st.markdown(
 
 # ── בניית טבלת הטיסות ──────────────────────────────────────────────────────
 # אם saved_flight_edits קיים — הוא ה-DataFrame המלא (כולל שורות שנוספו ידנית)
-# אם לא — טוענים מהאקסל
 _base_from_excel = flights_df.drop(columns=["טרייני רצ"], errors="ignore").copy()
 
 if "saved_flight_edits" in st.session_state:
     _saved = st.session_state["saved_flight_edits"].copy()
     _saved = _saved.drop(columns=["טרייני רצ"], errors="ignore")
-    # ודא שכל עמודות הבסיס קיימות
     for _c in _base_from_excel.columns:
         if _c not in _saved.columns:
             _saved[_c] = ""
-    # שמור רק עמודות ידועות + ETD
     _known_cols = [c for c in _base_from_excel.columns if c in _saved.columns]
     flights_editor_df = _saved[_known_cols].copy()
 else:
@@ -822,13 +819,19 @@ def _apply_fids_files(fids_file_objects, base_df):
                     base.loc[empty_mask, target_col] = val
                     filled += int(empty_mask.sum())
 
-    # עדכון שעת המראה לפי ETD — תמיד מחליף (גם אם כבר קיים ערך)
+    # עדכון שעת המראה לפי ETD:
+    # - ערך עם E בסוף (למשל "1016:30E") = שעה משוערת עתידית → מחליף המראה
+    # - ערך ללא E = המריאה בפועל → לא מחליף (הטיסה כבר עפה)
     _etd_src = _find_src(combined.columns, ["actual departure", "etd", "etdl", "etdz", "new departure"])
     if _etd_src and "המראה" in base.columns:
         for _, fr in combined.iterrows():
             _raw_etd = str(fr.get(_etd_src, "")).strip()
             if not _raw_etd or _raw_etd.lower() in {"nan", "none", "&nbsp"}:
                 continue
+            # בדיקת סיומת E (שעה משוערת עתידית)
+            _has_e = bool(re.search(r"\d{1,2}:\d{2}\s*E\s*$", re.sub(r"\s+", " ", _raw_etd), re.IGNORECASE))
+            if not _has_e:
+                continue   # המריאה בפועל — לא מחליפים
             _m = re.search(r"\d{1,2}:\d{2}", _raw_etd)
             if not _m:
                 continue
@@ -1021,12 +1024,30 @@ if "_fids_combined_raw" in st.session_state:
 
                     _f_dest = _cmp_find_src(_fids_cmp.columns, ["arrivalairport","arrival","destination","dest","יעד"])
                     _f_dep  = _cmp_find_src(_fids_cmp.columns, ["scheduleddeparture","std","scheduled","departure","המראה","etd","time"])
+                    _f_adep = _cmp_find_src(_fids_cmp.columns, ["actualdeparture","actual departure","etdl","etdz"])
                     _f_gate = _cmp_find_src(_fids_cmp.columns, ["gate","גייט"])
                     _f_ac   = _cmp_find_src(_fids_cmp.columns, ["aircraft","reg","registration","רישוי"])
                     _f_pax  = _cmp_find_src(_fids_cmp.columns, ["pax#","pax","passengers","נוסעים"])
 
                     def _cv(row, col):
                         return re.sub(r"\s+","",str(row.get(col,""))).strip() if col else ""
+
+                    def _parse_dep_time(row):
+                        """מחלץ שעת המראה: מעדיף ActualDeparture עם E (משוער עתידי), אחרת ScheduledDeparture"""
+                        # בדיקת ActualDeparture עם E
+                        if _f_adep:
+                            _adep_raw = re.sub(r"\s+", " ", str(row.get(_f_adep, ""))).strip()
+                            if re.search(r"\d{1,2}:\d{2}\s*E\s*$", _adep_raw, re.IGNORECASE):
+                                _m2 = re.search(r"\d{1,2}:\d{2}", _adep_raw)
+                                if _m2:
+                                    return _m2.group()
+                        # ברירת מחדל: ScheduledDeparture
+                        if _f_dep:
+                            _dep_raw = str(row.get(_f_dep, ""))
+                            _m = re.search(r"\d{1,2}:\d{2}", _dep_raw)
+                            if _m:
+                                return _m.group()
+                        return ""
 
                     if not _fids_active:
                         st.success("✅ כל הטיסות טופלו.")
@@ -1038,9 +1059,7 @@ if "_fids_combined_raw" in st.session_state:
                             _ly_num   = re.sub(r"^E(LY\d+)$", r"\1", _raw_num.upper())
                             if not _ly_num.startswith("LY"):
                                 _ly_num = re.sub(r"^[A-Z]*(\d+)$", r"LY\1", _raw_num.upper())
-                            _dep_raw  = str(_fr.get(_f_dep,"")) if _f_dep else ""
-                            _dep_m    = re.search(r"\d{1,2}:\d{2}", _dep_raw)
-                            _dep_time = _dep_m.group() if _dep_m else ""
+                            _dep_time = _parse_dep_time(_fr)
                             _dest_v   = _cv(_fr, _f_dest)
                             _gate_v   = _cv(_fr, _f_gate)
                             _ac_v     = _cv(_fr, _f_ac)
@@ -1076,8 +1095,11 @@ if "_fids_combined_raw" in st.session_state:
                                                 _new_row[_c] = ""
                                         _new_row = _new_row.reindex(columns=_cur.columns, fill_value="")
                                         _cur = pd.concat([_cur, _new_row], ignore_index=True)
+                                        # מיון כרונולוגי לפי שעת המראה
+                                        if "המראה" in _cur.columns:
+                                            _cur["_st"] = pd.to_datetime(_cur["המראה"], format="%H:%M", errors="coerce")
+                                            _cur = _cur.sort_values("_st").drop(columns=["_st"]).reset_index(drop=True)
                                         st.session_state["saved_flight_edits"] = _cur
-                                    # עדכן מעקב
                                     _track = st.session_state.get("fids_added_flights", [])
                                     if not any(x.get("טיסה","").upper()==_ly_num.upper() for x in _track):
                                         _track.append(_new_f)
@@ -1096,9 +1118,8 @@ if "_fids_combined_raw" in st.session_state:
                                 _ly_d = re.sub(r"^E(LY\d+)$",r"\1",_dn.upper())
                                 if not _ly_d.startswith("LY"):
                                     _ly_d = re.sub(r"^[A-Z]*(\d+)$",r"LY\1",_dn.upper())
-                                _dep_d  = re.search(r"\d{1,2}:\d{2}", str(_dr.get(_f_dep,"")) if _f_dep else "")
-                                _time_d = _dep_d.group() if _dep_d else ""
-                                _dest_d = _cv(_dr, _f_dest)
+                                _time_d  = _parse_dep_time(_dr)
+                                _dest_d  = _cv(_dr, _f_dest)
                                 _added_names = [x.get("טיסה","").upper() for x in st.session_state.get("fids_added_flights",[])]
                                 _tag = "✅ נוסף לשיבוץ" if _ly_d.upper() in _added_names else "🗑 הוסר"
                                 st.markdown(
