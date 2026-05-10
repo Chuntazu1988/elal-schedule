@@ -163,6 +163,15 @@ def build_shift_map_from_excel(uploaded_file):
                     key_rev = name_key(" ".join(reversed(possible_name.split())))
                     if key_rev not in shift_map:
                         shift_map[key_rev] = shift_map[key]
+                    # שמות עם שם אמצעי (3+ מילים): הוסף מפתחות ללא השם האמצעי
+                    # כדי לזהות עובדים שרשומים בקובץ העובדים עם שם ומשפחה בלבד
+                    _words = possible_name.split()
+                    if len(_words) >= 3:
+                        _first, _last = _words[0], _words[-1]
+                        for _combo in [f"{_first} {_last}", f"{_last} {_first}"]:
+                            _k = name_key(_combo)
+                            if _k not in shift_map:
+                                shift_map[_k] = shift_map[key]
 
                 entry = shift_map[key]
                 if sick:
