@@ -1,81 +1,12 @@
 import re
 import pandas as pd
-from html.parser import HTMLParser
 
 from constants import ROLE_COLUMNS
 from helpers import (
     clean_text, normalize_yes_no, normalize_time_text, clean_roster_name,
-    extract_shift_range_from_text, is_time_text, parse_times,
+    extract_shift_range_from_text, is_time_text, parse_times, safe_sort_by_time,
     find_column, flight_key, name_key, name_key_reversed,
 )
-
-
-# =========================
-# FIDS HTM PARSER
-# =========================
-
-class _FIDSHTMLParser(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self._in_td = False
-        self._rows = []
-        self._current_row = []
-        self._current_cell = ""
-        self._skip_header = True
-
-    def handle_starttag(self, tag, attrs):
-        if tag == "tr":
-            self._current_row = []
-        elif tag == "td":
-            self._in_td = True
-            self._current_cell = ""
-
-    def handle_endtag(self, tag):
-        if tag == "td":
-            self._in_td = False
-            self._current_row.append(self._current_cell.strip())
-        elif tag == "tr":
-            if self._current_row and len(self._current_row) >= 8:
-                if self._skip_header:
-                    self._skip_header = False
-                else:
-                    self._rows.append(self._current_row)
-
-    def handle_data(self, data):
-        if self._in_td:
-            self._current_cell += data
-
-
-def parse_fids_htm(uploaded_file):
-    """
-    מקבל קובץ HTM/HTML של FIDS ומחזיר DataFrame עם העמודות:
-    טיסה, יעד, שעה מתוכננת, שעה בפועל, גייט, מטוס/רישוי, נוסעים
-    עמודות אלו תואמות ל-flights_df ב-load_daily_schedule.
-    """
-    content = uploaded_file.read().decode("utf-8", errors="ignore")
-    parser = _FIDSHTMLParser()
-    parser.feed(content)
-
-    def extract_time(text):
-        m = re.search(r"(\d{2}:\d{2})", text)
-        return m.group(1) if m else ""
-
-    data = []
-    for cells in parser._rows:
-        flight_text = cells[0].replace("\xa0", " ").strip()
-        if not flight_text:
-            continue
-        data.append({
-            "טיסה":          flight_text,
-            "יעד":           cells[4].replace("\xa0", " ").strip(),
-            "שעה מתוכננת":   extract_time(cells[5]),
-            "שעה בפועל":     extract_time(cells[6]),
-            "גייט":          cells[2].replace("\xa0", " ").strip(),
-            "מטוס/רישוי":   cells[3].replace("\xa0", " ").strip(),
-            "נוסעים":        cells[7].replace("\xa0", " ").strip(),
-        })
-
-    return pd.DataFrame(data)
 
 
 # =========================
@@ -415,7 +346,7 @@ def load_daily_schedule(uploaded_file):
     flights_df["_flight_key"] = flights_df["טיסה"].apply(flight_key)
     flights_df = flights_df.drop_duplicates(subset=["_flight_key"], keep="first").drop(columns=["_flight_key"])
     flights_df = flights_df[flights_df["המראה"].astype(str).str.strip() != ""].copy()
-    flights_df = flights_df.reset_index(drop=True)
+    flights_df = safe_sort_by_time(flights_df, "המראה")
 
     return flights_df
 
@@ -488,5 +419,7 @@ def normalize_employees(df):
             return ""
         return s
     df["זמינות"] = df["זמינות"].apply(clean_avail)
+
+    df = df.drop_duplicates(subset=["שם"], keep="first").reset_index(drop=True)
 
     return df

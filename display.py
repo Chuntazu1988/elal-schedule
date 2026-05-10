@@ -1,40 +1,7 @@
 import io
 import re
-from datetime import datetime
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:
-    from backports.zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
-
-_IL_TZ = ZoneInfo("Asia/Jerusalem")
-
-def _flight_status_prefix(dep_str: str) -> str:
-    """
-    מחשב prefix לכותרת כרטיס הטיסה לפי שעה ישראלית:
-      "✈ טסה · "         — המריאה לפני יותר מ-15 דקות
-      "⚡ ממריא בקרוב · " — ממריאה עוד עד 45 דקות
-      ""                  — טיסה עתידית רגילה
-    """
-    try:
-        now   = datetime.now(tz=_IL_TZ)
-        now_m = now.hour * 60 + now.minute
-        # שולפים את השעה הראשונה מהמחרוזת (בורדינג/המראה בפורמט "HH:MM (HH:MM)")
-        m = re.search(r"(\d{1,2}):(\d{2})", str(dep_str))
-        if not m:
-            return ""
-        dep_m = int(m.group(1)) * 60 + int(m.group(2))
-        diff  = dep_m - now_m
-        if diff < -720:
-            diff += 1440   # תיקון חציית חצות
-        if diff < -15:
-            return "✈ טסה · "
-        if diff <= 45:
-            return "⚡ ממריא בקרוב · "
-    except Exception:
-        pass
-    return ""
 
 from helpers import (
     clean_text, safe_html, normalize_role_label, gender_role_label,
@@ -255,6 +222,7 @@ def build_workload(result_df, employees_df):
         return pd.DataFrame(columns=["עובד", "משימות", "דקות עבודה", "הפסקה נדרשת", "סה״כ כולל הפסקות"])
 
     timed = result_df[result_df["התחלה"].astype(str).str.strip() != ""].copy()
+    timed["עובד"] = timed["עובד"].apply(lambda x: clean_text(x) if not pd.isna(x) else x)
     real_workers = sorted([
         worker for worker in timed["עובד"].dropna().unique()
         if "❌" not in str(worker)
@@ -489,19 +457,12 @@ def render_flight_card(row):
 
     required_line = " | ".join([part.strip() for part in reqs.split("|") if part.strip()]) or "לא הוגדרו תפקידים"
 
-    _status_prefix = _flight_status_prefix(str(row.get("זמנים", "")))
-    _badge_html = ""
-    if "טסה" in _status_prefix:
-        _badge_html = '<span style="background:#fee2e2;color:#b91c1c;border-radius:5px;padding:1px 8px;font-size:11px;font-weight:700;margin-left:6px;">✈ טסה</span>'
-    elif "ממריא" in _status_prefix:
-        _badge_html = '<span style="background:#fef3c7;color:#92400e;border-radius:5px;padding:1px 8px;font-size:11px;font-weight:700;margin-left:6px;">⚡ ממריא בקרוב</span>'
-
     st.markdown(
         f"""
         <div class="flight-card">
           <div class="flight-head">
             <div class="flight-row">
-              <div class="flight-name">{_badge_html}✈️ {safe_html(row['מספר טיסה'])} ← {safe_html(row['יעד'])}</div>
+              <div class="flight-name">✈️ {safe_html(row['מספר טיסה'])} ← {safe_html(row['יעד'])}</div>
               <div class="flight-meta">🕒 {safe_html(row['זמנים'])} | 🛩️ {safe_html(aircraft)}</div>
             </div>
             <div class="req-line">תפקידים דרושים: {safe_html(required_line)}</div>
@@ -551,10 +512,8 @@ def render_flight_card_with_swap(row, schedule_df, employees_df):
     has_missing  = "❌" in left_text or "❌" in right_text
     missing_icon = " ⚠️" if has_missing else ""
 
-    _status_pfx = _flight_status_prefix(str(row.get("זמנים", "")))
-
     expander_label = (
-        f"{_status_pfx}✈️ {fnum} ← {row['יעד']}{missing_icon}"
+        f"✈️ {fnum} ← {row['יעד']}{missing_icon}"
         f"   |   🕒 {row['זמנים']}"
         f"   |   🛩️ {aircraft_short}"
         f"   |   {required_line}"
