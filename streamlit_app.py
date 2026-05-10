@@ -25,7 +25,9 @@ from data_loader import (
 from scheduler import (
     get_requirements, requirements_text, build_schedule, upgrade_teamleads,
     is_within_shift, get_qualified_candidates_for_swap, do_swap,
+    role_start_time, role_end_time,
 )
+from constants import ROLE_ORDER
 from display import (
     build_next_task_labels, build_output_table, build_workload,
     build_counter_continuity_rows, build_available_in_hall, build_unassigned_agents,
