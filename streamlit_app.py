@@ -647,19 +647,18 @@ if "saved_flight_edits" in st.session_state:
 # ── מיזוג טיסות שנוספו ידנית מ-FIDS ────────────────────────────────────────
 _fids_added = st.session_state.get("fids_added_flights", [])
 if _fids_added:
+    # ודא שעמודת ETD קיימת לפני הכל
+    if "ETD" not in flights_editor_df.columns:
+        flights_editor_df["ETD"] = ""
     _added_df = pd.DataFrame(_fids_added)
     _added_df = _added_df.drop(columns=["טרייני רצ", "סוג הכשרה"], errors="ignore")
     _existing_keys = set(flights_editor_df["טיסה"].astype(str).str.strip().str.upper())
     _new_only = _added_df[~_added_df["טיסה"].astype(str).str.strip().str.upper().isin(_existing_keys)]
     if not _new_only.empty:
-        for _col in flights_editor_df.columns:
-            if _col not in _new_only.columns:
-                _new_only = _new_only.copy()
-                _new_only[_col] = ""
-        if "ETD" not in flights_editor_df.columns:
-            flights_editor_df["ETD"] = ""
+        # reindex מוסיף עמודות חסרות עם ערך ריק — ללא KeyError
+        _new_only = _new_only.reindex(columns=flights_editor_df.columns, fill_value="")
         flights_editor_df = pd.concat(
-            [flights_editor_df, _new_only[flights_editor_df.columns]],
+            [flights_editor_df, _new_only],
             ignore_index=True,
         )
 
