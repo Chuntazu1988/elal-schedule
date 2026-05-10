@@ -629,38 +629,23 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-flights_editor_df = flights_df.drop(columns=["טרייני רצ"], errors="ignore").copy()
+# ── בניית טבלת הטיסות ──────────────────────────────────────────────────────
+# אם saved_flight_edits קיים — הוא ה-DataFrame המלא (כולל שורות שנוספו ידנית)
+# אם לא — טוענים מהאקסל
+_base_from_excel = flights_df.drop(columns=["טרייני רצ"], errors="ignore").copy()
 
-# Merge saved edits from previous session
 if "saved_flight_edits" in st.session_state:
-    saved = st.session_state["saved_flight_edits"]
-    for col in ["גייט", "רישוי", "נוסעים"]:
-        if col in saved.columns and col in flights_editor_df.columns:
-            merge = saved[["טיסה", col]].dropna(subset=[col])
-            merge = merge[merge[col].astype(str).str.strip() != ""]
-            for _, mrow in merge.iterrows():
-                mask = flights_editor_df["טיסה"] == mrow["טיסה"]
-                if mask.any():
-                    flights_editor_df.loc[mask, col] = mrow[col]
-
-
-# ── מיזוג טיסות שנוספו ידנית מ-FIDS ────────────────────────────────────────
-_fids_added = st.session_state.get("fids_added_flights", [])
-if _fids_added:
-    # ודא שעמודת ETD קיימת לפני הכל
-    if "ETD" not in flights_editor_df.columns:
-        flights_editor_df["ETD"] = ""
-    _added_df = pd.DataFrame(_fids_added)
-    _added_df = _added_df.drop(columns=["טרייני רצ", "סוג הכשרה"], errors="ignore")
-    _existing_keys = set(flights_editor_df["טיסה"].astype(str).str.strip().str.upper())
-    _new_only = _added_df[~_added_df["טיסה"].astype(str).str.strip().str.upper().isin(_existing_keys)]
-    if not _new_only.empty:
-        # reindex מוסיף עמודות חסרות עם ערך ריק — ללא KeyError
-        _new_only = _new_only.reindex(columns=flights_editor_df.columns, fill_value="")
-        flights_editor_df = pd.concat(
-            [flights_editor_df, _new_only],
-            ignore_index=True,
-        )
+    _saved = st.session_state["saved_flight_edits"].copy()
+    _saved = _saved.drop(columns=["טרייני רצ"], errors="ignore")
+    # ודא שכל עמודות הבסיס קיימות
+    for _c in _base_from_excel.columns:
+        if _c not in _saved.columns:
+            _saved[_c] = ""
+    # שמור רק עמודות ידועות + ETD
+    _known_cols = [c for c in _base_from_excel.columns if c in _saved.columns]
+    flights_editor_df = _saved[_known_cols].copy()
+else:
+    flights_editor_df = _base_from_excel.copy()
 
 
 def _build_display_df(df):
@@ -787,7 +772,6 @@ def _apply_fids_files(fids_file_objects, base_df):
             fc = _find_src(fids_df.columns, ["flight number", "flight", "flightno", "flt", "טיסה"])
             if fc:
                 fids_df["_fk"] = fids_df[fc].apply(_flt_key)
-                # סינון טיסות 8xxx משני הקבצים
                 fids_df = fids_df[~fids_df["_fk"].str.startswith("8")]
 
                 def _before_0200(v):
@@ -795,12 +779,10 @@ def _apply_fids_files(fids_file_objects, base_df):
                     if not _m: return False
                     return (int(_m.group(1)), int(_m.group(2))) < (2, 0)
 
-                _dep_src_f = _find_src(fids_df.columns, ["std", "scheduled", "scheduleddeparture", "departure", "המראה", "etd", "time"])
+                _dep_src_f = _find_src(fids_df.columns, ["std","scheduled","scheduleddeparture","departure","המראה","etd","time"])
                 if _file_idx == 0 and _dep_src_f:
-                    # קובץ היום — מסנן החוצה טיסות לפני 02:00 (טיסות לילה של אתמול)
                     fids_df = fids_df[~fids_df[_dep_src_f].apply(_before_0200)]
                 elif _file_idx == 1 and _dep_src_f:
-                    # קובץ מחר — שומר רק טיסות לפני 02:00 (טיסות הלילה הקרוב)
                     fids_df = fids_df[fids_df[_dep_src_f].apply(_before_0200)]
 
                 fids_df["_fids_src"] = _file_idx
@@ -883,9 +865,6 @@ if (_fids1 or _fids2) and not st.session_state.get("fids_applied"):
 display_df = _build_display_df(flights_editor_df)
 display_df.index = range(1, len(display_df) + 1)
 
-# מפתח דינמי — מתחדש כשמספר הטיסות משתנה (מונע cache ישן של Streamlit)
-_editor_key = f"flights_editor_{len(flights_editor_df)}_{len(st.session_state.get('fids_added_flights', []))}"
-
 with st.form("flights_form"):
     edited_display = st.data_editor(
         display_df,
@@ -899,7 +878,7 @@ with st.form("flights_form"):
             "גייט":            st.column_config.TextColumn("🚪 גייט"),
             "נוסעים":          st.column_config.TextColumn("👥 נוסעים"),
         },
-        key=_editor_key,
+        key="flights_editor",
     )
     col_save, col_clear = st.columns([3, 1])
     with col_save:
@@ -908,12 +887,7 @@ with st.form("flights_form"):
         clear_clicked = st.form_submit_button("🗑️ נקה", use_container_width=True)
 
 if save_clicked:
-    # edited_display עשוי לא להכיל שורות חדשות אם המפתח השתנה —
-    # לכן משתמשים ב-display_df כבסיס ומחילים רק שינויים שנעשו
-    try:
-        parsed_back = _parse_display_to_original(edited_display, flights_editor_df)
-    except Exception:
-        parsed_back = flights_editor_df.copy()
+    parsed_back = _parse_display_to_original(edited_display, flights_editor_df)
     st.session_state["saved_flight_edits"] = parsed_back
     st.success("הנתונים נשמרו ✅")
 
@@ -1037,28 +1011,29 @@ if "_fids_combined_raw" in st.session_state:
                     _dismissed   = st.session_state.get("fids_dismissed", set())
                     _fids_active = _only_fids - _dismissed
                     _fids_done   = _only_fids & _dismissed
+                    _done_lbl    = f" ({len(_fids_done)} טופלו)" if _fids_done else ""
 
-                    _done_lbl = f" ({len(_fids_done)} טופלו)" if _fids_done else ""
                     st.markdown(
                         f'<div style="direction:rtl;font-weight:800;font-size:14px;'
                         f'color:#1d4ed8;margin:10px 0 4px;">🔵 טיסות ב-FIDS שאינן בסידור{_done_lbl}</div>',
                         unsafe_allow_html=True,
                     )
 
-                    # עמודות עזר לשליפת נתוני הטיסה
                     _f_dest = _cmp_find_src(_fids_cmp.columns, ["arrivalairport","arrival","destination","dest","יעד"])
                     _f_dep  = _cmp_find_src(_fids_cmp.columns, ["scheduleddeparture","std","scheduled","departure","המראה","etd","time"])
                     _f_gate = _cmp_find_src(_fids_cmp.columns, ["gate","גייט"])
                     _f_ac   = _cmp_find_src(_fids_cmp.columns, ["aircraft","reg","registration","רישוי"])
                     _f_pax  = _cmp_find_src(_fids_cmp.columns, ["pax#","pax","passengers","נוסעים"])
 
-                    def _clean(v): return re.sub(r"\s+","",str(v)).strip() if v else ""
+                    def _cv(row, col):
+                        return re.sub(r"\s+","",str(row.get(col,""))).strip() if col else ""
 
                     if not _fids_active:
                         st.success("✅ כל הטיסות טופלו.")
                     else:
-                        _of_rows = _fids_cmp[_fids_cmp["_fk"].isin(_fids_active)]
-                        for _oi, (_, _fr) in enumerate(_of_rows.iterrows()):
+                        for _oi, (_, _fr) in enumerate(
+                            _fids_cmp[_fids_cmp["_fk"].isin(_fids_active)].iterrows()
+                        ):
                             _raw_num  = str(_fr.get(_fc,"")).strip()
                             _ly_num   = re.sub(r"^E(LY\d+)$", r"\1", _raw_num.upper())
                             if not _ly_num.startswith("LY"):
@@ -1066,10 +1041,10 @@ if "_fids_combined_raw" in st.session_state:
                             _dep_raw  = str(_fr.get(_f_dep,"")) if _f_dep else ""
                             _dep_m    = re.search(r"\d{1,2}:\d{2}", _dep_raw)
                             _dep_time = _dep_m.group() if _dep_m else ""
-                            _dest_v   = _clean(_fr.get(_f_dest,"")) if _f_dest else ""
-                            _gate_v   = _clean(_fr.get(_f_gate,"")) if _f_gate else ""
-                            _ac_v     = _clean(_fr.get(_f_ac,""))   if _f_ac   else ""
-                            _pax_v    = _clean(_fr.get(_f_pax,""))  if _f_pax  else ""
+                            _dest_v   = _cv(_fr, _f_dest)
+                            _gate_v   = _cv(_fr, _f_gate)
+                            _ac_v     = _cv(_fr, _f_ac)
+                            _pax_v    = _cv(_fr, _f_pax)
                             _fk_key   = str(_fr.get("_fk", _raw_num))
                             _bk       = re.sub(r"[^a-zA-Z0-9]","_",_fk_key)
 
@@ -1087,18 +1062,26 @@ if "_fids_combined_raw" in st.session_state:
                             with _ca:
                                 if st.button("➕ הוסף לשיבוץ", key=f"fadd_{_bk}_{_oi}", use_container_width=True):
                                     _new_f = {
-                                        "טיסה": _ly_num, "יעד": _dest_v,
-                                        "המראה": _dep_time, "בורדינג": "",
-                                        "גייט": _gate_v, "סוג מטוס": "",
-                                        "רישוי": _ac_v, "נוסעים": _pax_v,
-                                        "טרייני רצ": "לא", "סוג הכשרה": "",
+                                        "טיסה":_ly_num, "יעד":_dest_v, "המראה":_dep_time,
+                                        "בורדינג":"", "גייט":_gate_v, "סוג מטוס":"",
+                                        "רישוי":_ac_v, "נוסעים":_pax_v,
                                     }
-                                    _added = st.session_state.get("fids_added_flights", [])
-                                    # הוסף רק אם לא כבר קיים
-                                    _already = [x for x in _added if x.get("טיסה","").upper() == _ly_num.upper()]
-                                    if not _already:
-                                        _added.append(_new_f)
-                                        st.session_state["fids_added_flights"] = _added
+                                    # הוסף ישירות ל-saved_flight_edits
+                                    _cur = st.session_state.get("saved_flight_edits", flights_editor_df).copy()
+                                    _ex  = set(_cur["טיסה"].astype(str).str.strip().str.upper())
+                                    if _ly_num.upper() not in _ex:
+                                        _new_row = pd.DataFrame([_new_f])
+                                        for _c in _cur.columns:
+                                            if _c not in _new_row.columns:
+                                                _new_row[_c] = ""
+                                        _new_row = _new_row.reindex(columns=_cur.columns, fill_value="")
+                                        _cur = pd.concat([_cur, _new_row], ignore_index=True)
+                                        st.session_state["saved_flight_edits"] = _cur
+                                    # עדכן מעקב
+                                    _track = st.session_state.get("fids_added_flights", [])
+                                    if not any(x.get("טיסה","").upper()==_ly_num.upper() for x in _track):
+                                        _track.append(_new_f)
+                                        st.session_state["fids_added_flights"] = _track
                                     st.session_state.setdefault("fids_dismissed", set()).add(_fk_key)
                                     st.rerun()
                             with _cd:
@@ -1106,31 +1089,25 @@ if "_fids_combined_raw" in st.session_state:
                                     st.session_state.setdefault("fids_dismissed", set()).add(_fk_key)
                                     st.rerun()
 
-                    # טיסות שטופלו — מוצגות בכפתור קומפקטי
                     if _fids_done:
                         with st.expander(f"📋 הצג {len(_fids_done)} טיסות שטופלו"):
-                            _done_rows = _fids_cmp[_fids_cmp["_fk"].isin(_fids_done)]
-                            for _, _dr in _done_rows.iterrows():
-                                _dn = str(_dr.get(_fc,"")).strip()
+                            for _, _dr in _fids_cmp[_fids_cmp["_fk"].isin(_fids_done)].iterrows():
+                                _dn   = str(_dr.get(_fc,"")).strip()
                                 _ly_d = re.sub(r"^E(LY\d+)$",r"\1",_dn.upper())
                                 if not _ly_d.startswith("LY"):
                                     _ly_d = re.sub(r"^[A-Z]*(\d+)$",r"LY\1",_dn.upper())
-                                _dep_d = re.search(r"\d{1,2}:\d{2}", str(_dr.get(_f_dep,"")) if _f_dep else "")
+                                _dep_d  = re.search(r"\d{1,2}:\d{2}", str(_dr.get(_f_dep,"")) if _f_dep else "")
                                 _time_d = _dep_d.group() if _dep_d else ""
-                                _dest_d = _clean(_dr.get(_f_dest,"")) if _f_dest else ""
-                                _was_added = any(
-                                    x.get("טיסה","").upper() == _ly_d.upper()
-                                    for x in st.session_state.get("fids_added_flights",[])
-                                )
-                                _tag = "✅ נוסף" if _was_added else "🗑 הוסר"
+                                _dest_d = _cv(_dr, _f_dest)
+                                _added_names = [x.get("טיסה","").upper() for x in st.session_state.get("fids_added_flights",[])]
+                                _tag = "✅ נוסף לשיבוץ" if _ly_d.upper() in _added_names else "🗑 הוסר"
                                 st.markdown(
                                     f'<div style="direction:rtl;background:#f0fdf4;border:1px solid #bbf7d0;'
                                     f'border-radius:6px;padding:4px 10px;font-size:12px;color:#166534;margin:2px 0;">'
-                                    f'{_tag} &nbsp; <strong>{_ly_d}</strong>'
+                                    f'{_tag} &nbsp;<strong>{_ly_d}</strong>'
                                     f'{"  →  "+_dest_d if _dest_d else ""}'
                                     f'{"  🕒 "+_time_d if _time_d else ""}'
                                     f'</div>', unsafe_allow_html=True)
-                            # כפתור לשחרור הסתרה
                             if st.button("↺ שחזר הכל", key="fids_restore_all"):
                                 st.session_state.pop("fids_dismissed", None)
                                 st.rerun()
