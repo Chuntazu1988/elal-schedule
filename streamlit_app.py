@@ -1142,6 +1142,31 @@ def recompute_from_schedule(schedule_df, flights_df, employees_df):
     return labeled_df, workload_df, continuity_df, output_df
 
 
+# ── תאריך ושעה נוכחיים (ישראל) ───────────────────────────────────────────────
+try:
+    from zoneinfo import ZoneInfo as _ZI
+except ImportError:
+    from backports.zoneinfo import ZoneInfo as _ZI
+
+_IL_TZ_APP = _ZI("Asia/Jerusalem")
+_now_il = __import__("datetime").datetime.now(tz=_IL_TZ_APP)
+_DAY_HE = {
+    "Monday":"יום שני","Tuesday":"יום שלישי","Wednesday":"יום רביעי",
+    "Thursday":"יום חמישי","Friday":"יום שישי","Saturday":"שבת","Sunday":"יום ראשון",
+}
+_day_he = _DAY_HE.get(_now_il.strftime("%A"), _now_il.strftime("%A"))
+
+st.markdown(
+    f'<div style="direction:rtl;text-align:center;background:linear-gradient(90deg,#eef5ff,#f0fdf4);'
+    f'border:1px solid #c7d9f5;border-radius:10px;padding:7px 16px;margin-bottom:10px;'
+    f'font-size:13.5px;color:#1e3a5f;font-weight:600;">'
+    f'📅 {_day_he}, {_now_il.strftime("%d/%m/%Y")}'
+    f'&nbsp;&nbsp;|&nbsp;&nbsp;'
+    f'🕐 שעה נוכחית (ישראל): <strong style="font-size:15px;">{_now_il.strftime("%H:%M")}</strong>'
+    f'</div>',
+    unsafe_allow_html=True,
+)
+
 # ── Build button ──────────────────────────────────────────────────────────────
 if st.button("🚀 בנה שיבוץ", use_container_width=True):
     try:
