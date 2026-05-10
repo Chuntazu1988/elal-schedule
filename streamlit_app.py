@@ -699,6 +699,7 @@ if _fids_file and _fids_name and _fids_name != st.session_state.get("_fids_proce
             fc = next((c for c in fids_df.columns if "טיסה" in c or c.lower() in {"flight", "flightno"}), None)
         if not fc:
             st.warning("📡 קובץ FIDS: לא נמצאה עמודת טיסה.")
+            st.write("עמודות שנמצאו בקובץ:", list(fids_df.columns))
         else:
             def _normalize_fk(val):
                 """ELY003 → LY003 → LY003, LY3 → LY003"""
@@ -712,6 +713,17 @@ if _fids_file and _fids_name and _fids_name != st.session_state.get("_fids_proce
             if "ETD" not in base.columns:
                 base["ETD"] = ""
             base["_fk"] = base["טיסה"].astype(str).apply(_normalize_fk)
+
+            # ── DEBUG (הסירי אחרי שהכל עובד) ──
+            with st.expander("🔍 דיבוג FIDS", expanded=True):
+                st.write("**עמודות FIDS:**", list(fids_df.columns))
+                st.write("**3 שורות ראשונות מה-FIDS:**", fids_df.head(3))
+                st.write("**מפתחות FIDS (fk):**", fids_df["_fk"].head(5).tolist())
+                st.write("**מפתחות סידור (fk):**", base["_fk"].head(5).tolist())
+                common = set(fids_df["_fk"]) & set(base["_fk"])
+                st.write(f"**התאמות שנמצאו:** {len(common)} טיסות — {list(common)[:5]}")
+            # ── סוף DEBUG ──
+
             COL_MAP = {
                 "גייט":   ["גייט", "gate", "Gate", "GATE"],
                 "רישוי":  ["מטוס/רישוי", "רישוי", "reg", "Reg", "registration", "REG", "aircraft", "Aircraft"],
