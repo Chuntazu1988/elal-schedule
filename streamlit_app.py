@@ -1730,21 +1730,22 @@ if "schedule_df" in st.session_state:
         )
         missing = live_schedule[live_schedule["עובד"].astype(str).str.contains("❌", na=False)]
 
-        # ── Auto-navigate to Gantt tab if requested ─────────────────────────
+        # ── מסך גאנט בלבד ───────────────────────────────────────────────────
         if _goto_gantt:
             st.session_state.pop("show_gantt_page", None)
-            _components.html("""<script>
-(function(){
-  function clickGantt(){
-    var tabs=window.parent.document.querySelectorAll('[data-baseweb="tab"]');
-    for(var i=0;i<tabs.length;i++){
-      if(tabs[i].textContent.includes("גאנט")){tabs[i].click();return;}
-    }
-    setTimeout(clickGantt,150);
-  }
-  setTimeout(clickGantt,400);
-})();
-</script>""", height=0)
+            # כפתור חזרה
+            _gb1, _gb2 = st.columns([1, 8])
+            with _gb1:
+                if st.button("← חזרה", key="gantt_back_btn"):
+                    st.rerun()
+            with _gb2:
+                st.markdown(
+                    '<div style="direction:rtl;font-size:20px;font-weight:900;'
+                    'color:#00c9be;padding:4px 0;">📅 גאנט עובדים</div>',
+                    unsafe_allow_html=True,
+                )
+            _render_interactive_gantt(live_schedule, st.session_state["schedule_df"])
+            st.stop()
 
         (tab_schedule, tab_gantt, tab_missing, tab_available,
          tab_unassigned, tab_breaks, tab_workload, tab_continuity, tab_raw) = st.tabs([
