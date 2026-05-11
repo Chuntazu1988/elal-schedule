@@ -1689,7 +1689,7 @@ if(MISSING && MISSING.length > 0){{
         f"const MISSING={missing_json};\nconst WORKERS="
     )
 
-    _components.html(gantt_html_final, height=0, scrolling=False)
+    _components.html(gantt_html_final, height=820, scrolling=False)
 
 
 
@@ -1861,15 +1861,7 @@ if "schedule_df" in st.session_state:
 
         # ── Tab: גאנט ────────────────────────────────────────────────────────
         with tab_gantt:
-            _render_interactive_gantt(live_schedule, st.session_state["schedule_df"])
-
-
-            st.subheader("❌ חוסרים")
-            if missing.empty:
-                st.success("אין חוסרים 🎉")
-            else:
-                st.warning(f"נמצאו {len(missing)} חוסרים")
-                st.dataframe(missing, use_container_width=True)
+            _render_interactive_gantt(live_schedule, st.session_state["schedule_df"], missing_df=missing)
 
         # ── Tab: פנויים באולם ─────────────────────────────────────────────────
         with tab_available:
