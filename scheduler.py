@@ -450,7 +450,7 @@ def sort_candidates(candidates, assignments, role, task_start=None, task_end=Non
 
     if role == "דייל":
         candidates["_role_fit"] = candidates.apply(
-            lambda row: 0 if str(row.get("ראש צוות", "")).strip() == "כן" else 1, axis=1
+            lambda row: 1 if str(row.get("ראש צוות", "")).strip() == "כן" else 0, axis=1
         )
         return candidates.sort_values(
             ["_dual_qual", "_shift_priority", "_area_penalty", "_nearby_tasks", "_shift_proximity", "_role_fit", "_task_count"]
