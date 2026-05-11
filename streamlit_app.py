@@ -661,179 +661,133 @@ WORKERS.forEach(w=>{{
 
         # ── Tab: לא משובצים ───────────────────────────────────────────────────
         with tab_unassigned:
+            st.subheader("🏠 דיילים וראשי צוות שלא שובצו לטיסות היום")
             if "break_log" not in st.session_state:
                 st.session_state["break_log"] = {}
 
             shift_map_ref = build_shift_map_from_excel(daily_file)
             unassigned_df = build_unassigned_agents(live_schedule, live_employees, shift_map_ref)
 
-            # ── תקציר מצב (Snapshot) ──────────────────────────────────────────
-            on_break_names = {
+            # ── תקציר מצב ──────────────────────────────────────────────────
+            _on_break_names = {
                 n for n, info in st.session_state["break_log"].items()
                 if info.get("ts") and not info.get("end_ts")
             }
-            count_on_flights  = live_schedule[
+            _count_flights  = live_schedule[
                 ~live_schedule["עובד"].astype(str).str.contains("❌", na=False) &
                 (live_schedule["עובד"].astype(str).str.strip() != "")
             ]["עובד"].nunique()
-            count_on_break    = len(on_break_names)
-            count_at_counters = len(unassigned_df[~unassigned_df["שם"].isin(on_break_names)])
-
-            st.markdown(
-                '<div style="direction:rtl;font-size:15px;font-weight:900;color:#071b3a;'
-                'margin-bottom:10px;">🏠 דיילים וראשי צוות שלא שובצו לטיסות היום</div>',
-                unsafe_allow_html=True,
-            )
-            snap_c1, snap_c2, snap_c3 = st.columns(3)
-            snap_c1.metric("✈️ בטיסות", count_on_flights)
-            snap_c2.metric("🏢 בדלפקים", count_at_counters)
-            snap_c3.metric("☕ בהפסקה",  count_on_break)
+            _count_break    = len(_on_break_names)
+            _count_counters = len(unassigned_df[~unassigned_df["שם"].isin(_on_break_names)])
+            _sc1, _sc2, _sc3 = st.columns(3)
+            _sc1.metric("✈️ בטיסות",  _count_flights)
+            _sc2.metric("🏢 בדלפקים", _count_counters)
+            _sc3.metric("☕ בהפסקה",  _count_break)
             st.markdown("---")
 
             if unassigned_df.empty:
                 st.success("כל העובדים שובצו לטיסות 🎉")
             else:
-                # ── סינון לפי תפקיד ───────────────────────────────────────────
-                col_filt, col_total = st.columns([4, 1])
-                with col_filt:
-                    role_filter = st.radio(
+                _col_filt, _col_tot = st.columns([4, 1])
+                with _col_filt:
+                    _role_filter = st.radio(
                         "סנן לפי תפקיד:",
                         ["הכל", "דייל", "ראש צוות"],
                         horizontal=True,
                         key="unassigned_role_filter",
                     )
-                with col_total:
+                with _col_tot:
                     st.metric("סה״כ לא משובצים", len(unassigned_df))
+                unassigned_df = unassigned_df if _role_filter == "הכל" else unassigned_df[unassigned_df["תפקיד"] == _role_filter]
+                st.markdown("---")
+                for shift_label, group in unassigned_df.groupby("משמרת"):
+                    start_h = shift_label.split("-")[0] if "-" in shift_label else "00:00"
+                    try:
+                        sh = int(start_h.split(":")[0])
+                        if   5 <= sh < 12:  emoji, label = "🌅", f"משמרת בוקר — {shift_label}"
+                        elif 12 <= sh < 18:  emoji, label = "☀️", f"משמרת צהריים — {shift_label}"
+                        elif 18 <= sh < 22:  emoji, label = "🌆", f"משמרת ערב — {shift_label}"
+                        else:                emoji, label = "🌙", f"משמרת לילה — {shift_label}"
+                    except Exception:
+                        emoji, label = "🕐", f"משמרת — {shift_label}"
 
-                filtered_unassigned = (
-                    unassigned_df if role_filter == "הכל"
-                    else unassigned_df[unassigned_df["תפקיד"] == role_filter]
-                )
+                    st.markdown(
+                        f'<div style="direction:rtl;background:#eef5ff;border-right:4px solid #3b82f6;'
+                        f'border-radius:10px;padding:8px 14px;margin:10px 0 6px 0;'
+                        f'font-size:14px;font-weight:900;color:#071b3a;">'
+                        f'{emoji} {safe_html(label)} ({len(group)} עובדים)</div>',
+                        unsafe_allow_html=True,
+                    )
+                    for _, r in group.iterrows():
+                        name = r["שם"]
+                        role = r["תפקיד"]
+                        btn_key    = re.sub(r"[^a-zA-Zא-ת0-9]", "_", name)
+                        role_color = "#8e24aa" if role == "ראש צוות" else "#5b9bd5"
+                        break_info = st.session_state["break_log"].get(name, {})
+                        on_break   = bool(break_info.get("ts")) and not break_info.get("end_ts")
+                        break_done = bool(break_info.get("ts")) and bool(break_info.get("end_ts"))
+                        emp_row_m  = live_employees[live_employees["שם"] == name]
+                        bl = break_label_for_employee(emp_row_m.iloc[0]) if not emp_row_m.empty else ""
+                        break_duration = 65 if bl == "הפסקה ורענון" else 45 if bl == "הפסקה" else 20
 
-                if filtered_unassigned.empty:
-                    st.info(f"אין עובדים מסוג '{role_filter}' שלא שובצו.")
-                else:
-                    for shift_label, group in filtered_unassigned.groupby("משמרת"):
-                        start_h = shift_label.split("-")[0] if "-" in shift_label else "00:00"
-                        try:
-                            sh = int(start_h.split(":")[0])
-                            if   5 <= sh < 12:  emoji, label = "🌅", f"משמרת בוקר — {shift_label}"
-                            elif 12 <= sh < 18: emoji, label = "☀️", f"משמרת צהריים — {shift_label}"
-                            elif 18 <= sh < 22: emoji, label = "🌆", f"משמרת ערב — {shift_label}"
-                            else:               emoji, label = "🌙", f"משמרת לילה — {shift_label}"
-                        except Exception:
-                            emoji, label = "🕐", f"משמרת — {shift_label}"
+                        if on_break:
+                            card_bg, card_border, card_label = "#fef3c7", role_color, "☕ בהפסקה"
+                        elif break_done:
+                            card_bg, card_border, card_label = "#d1fae5", role_color, "✅ הפסקה הסתיימה"
+                        else:
+                            card_bg, card_border, card_label = "#fff", role_color, ""
 
                         st.markdown(
-                            f'<div style="direction:rtl;background:#eef5ff;border-right:4px solid #3b82f6;'
-                            f'border-radius:10px;padding:8px 14px;margin:12px 0 8px 0;'
-                            f'font-size:14px;font-weight:900;color:#071b3a;">'
-                            f'{emoji} {safe_html(label)} ({len(group)} עובדים)</div>',
+                            f'<div style="direction:rtl;background:{card_bg};border:1px solid #e0e8f4;'
+                            f'border-right:4px solid {card_border};border-radius:8px;'
+                            f'padding:6px 12px;margin-bottom:2px;font-size:13px;">'
+                            f'<strong style="color:#071b3a;">{safe_html(name)}</strong>'
+                            f'&nbsp;<span style="color:{role_color};font-weight:800;">({safe_html(role)})</span>'
+                            + (f'&nbsp;&nbsp;<span style="color:#92400e;">{card_label}</span>' if card_label else "") +
+                            f"</div>",
                             unsafe_allow_html=True,
                         )
-
-                        for _, r in group.iterrows():
-                            name  = r["שם"]
-                            role  = r["תפקיד"]
-                            btn_key    = re.sub(r"[^a-zA-Zא-ת0-9]", "_", name)
-                            is_tl      = role == "ראש צוות"
-                            role_color = "#7c3aed" if is_tl else "#1d4ed8"
-                            role_bg    = "#ede9fe" if is_tl else "#dbeafe"
-
-                            break_info = st.session_state["break_log"].get(name, {})
-                            on_break   = bool(break_info.get("ts")) and not break_info.get("end_ts")
-                            break_done = bool(break_info.get("ts")) and bool(break_info.get("end_ts"))
-
-                            emp_row_m = live_employees[live_employees["שם"] == name]
-                            bl = break_label_for_employee(emp_row_m.iloc[0]) if not emp_row_m.empty else ""
-
-                            # זמן הפסקה שחלף
-                            elapsed_str = ""
-                            if on_break and break_info.get("ts"):
-                                elapsed_min = int((_time_module.time() - break_info["ts"]) / 60)
-                                elapsed_str = f" · {elapsed_min} דק׳"
-
-                            if on_break:
-                                card_bg, card_border = "#fefce8", "#f59e0b"
-                                status_html = f'<span style="background:#fef3c7;color:#92400e;font-weight:800;font-size:12px;border-radius:20px;padding:2px 9px;">☕ בהפסקה{elapsed_str}</span>'
-                            elif break_done:
-                                card_bg, card_border = "#f0fdf4", "#22c55e"
-                                status_html = '<span style="background:#dcfce7;color:#166534;font-weight:800;font-size:12px;border-radius:20px;padding:2px 9px;">✅ הפסקה הסתיימה</span>'
+                        col_start, col_end, col_reset, col_assign = st.columns([2, 2, 1, 3])
+                        with col_start:
+                            if not on_break and not break_done:
+                                if st.button("▶ התחל הפסקה", key=f"brk_start_{btn_key}", use_container_width=True):
+                                    st.session_state["break_log"][name] = {"ts": int(_time_module.time()), "end_ts": None}
+                                    st.rerun()
                             else:
-                                card_bg, card_border = "#ffffff", role_color
-                                bl_html     = f'<span style="color:#9ca3af;font-size:11px;">{safe_html(bl)}</span>' if bl else ""
-                                status_html = bl_html
-
-                            # חריצים פנויים לשיבוץ
-                            search_role  = "ראש צוות" if is_tl else "דייל"
-                            open_slots   = live_schedule[
+                                st.button("▶ התחל הפסקה", key=f"brk_start_{btn_key}", disabled=True, use_container_width=True)
+                        with col_end:
+                            if on_break:
+                                if st.button("⏹ סיים הפסקה", key=f"brk_end_{btn_key}", use_container_width=True):
+                                    st.session_state["break_log"][name]["end_ts"] = int(_time_module.time())
+                                    st.rerun()
+                            else:
+                                st.button("⏹ סיים הפסקה", key=f"brk_end_{btn_key}", disabled=True, use_container_width=True)
+                        with col_reset:
+                            if break_info:
+                                if st.button("↺", key=f"brk_reset_{btn_key}", help="אפס הפסקה"):
+                                    st.session_state["break_log"].pop(name, None)
+                                    st.rerun()
+                        with col_assign:
+                            _search_role = "ראש צוות" if role == "ראש צוות" else "דייל"
+                            _open_slots = live_schedule[
                                 live_schedule["עובד"].astype(str).str.contains("❌", na=False) &
-                                (live_schedule["תפקיד בסיס"].astype(str).apply(normalize_role_label) == search_role)
+                                (live_schedule["תפקיד בסיס"].astype(str).apply(normalize_role_label) == _search_role)
                             ]
-                            open_flights = sorted(open_slots["טיסה"].astype(str).str.strip().unique().tolist())
-
-                            # ── כרטיסייה משופרת ───────────────────────────────
-                            st.markdown(
-                                f'<div style="direction:rtl;background:{card_bg};'
-                                f'border:1px solid #e5e7eb;border-right:5px solid {card_border};'
-                                f'border-radius:12px;padding:10px 14px 8px;margin-bottom:6px;'
-                                f'box-shadow:0 1px 4px rgba(0,0,0,0.06);">'
-                                f'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">'
-                                f'<strong style="color:#111827;font-size:14px;">{safe_html(name)}</strong>'
-                                f'<div style="display:flex;gap:6px;align-items:center;">'
-                                f'<span style="background:{role_bg};color:{role_color};font-size:11px;font-weight:800;border-radius:20px;padding:2px 10px;">{safe_html(role)}</span>'
-                                f'{status_html}'
-                                f'</div></div>'
-                                f'<div style="color:#6b7280;font-size:12px;margin-top:4px;">🕐 {safe_html(r["משמרת"])}</div>'
-                                f'</div>',
-                                unsafe_allow_html=True,
-                            )
-
-                            col_start, col_end, col_reset, col_assign = st.columns([2, 2, 1, 3])
-                            with col_start:
-                                if not on_break and not break_done:
-                                    if st.button("▶ התחל הפסקה", key=f"brk_start_{btn_key}", use_container_width=True):
-                                        st.session_state["break_log"][name] = {"ts": int(_time_module.time()), "end_ts": None}
-                                        st.rerun()
-                                else:
-                                    st.button("▶ התחל הפסקה", key=f"brk_start_{btn_key}", disabled=True, use_container_width=True)
-                            with col_end:
-                                if on_break:
-                                    if st.button("⏹ סיים הפסקה", key=f"brk_end_{btn_key}", use_container_width=True):
-                                        st.session_state["break_log"][name]["end_ts"] = int(_time_module.time())
-                                        st.rerun()
-                                else:
-                                    st.button("⏹ סיים הפסקה", key=f"brk_end_{btn_key}", disabled=True, use_container_width=True)
-                            with col_reset:
-                                if break_info:
-                                    if st.button("↺", key=f"brk_reset_{btn_key}", help="אפס הפסקה"):
-                                        st.session_state["break_log"].pop(name, None)
-                                        st.rerun()
-                            with col_assign:
-                                if open_flights:
-                                    assign_flight = st.selectbox(
-                                        "",
-                                        ["— שבץ לטיסה —"] + open_flights,
-                                        key=f"assign_sel_{btn_key}",
-                                        label_visibility="collapsed",
-                                    )
-                                    if assign_flight != "— שבץ לטיסה —":
-                                        if st.button("✅ שבץ", key=f"assign_btn_{btn_key}", use_container_width=True):
-                                            slot = st.session_state["schedule_df"][
-                                                (st.session_state["schedule_df"]["טיסה"].astype(str).str.strip() == assign_flight.strip()) &
-                                                st.session_state["schedule_df"]["עובד"].astype(str).str.contains("❌", na=False) &
-                                                (st.session_state["schedule_df"]["תפקיד בסיס"].astype(str).apply(normalize_role_label) == search_role)
-                                            ]
-                                            if not slot.empty:
-                                                task_idx_assign = slot.index[0]
-                                                updated = do_swap(st.session_state["schedule_df"], task_idx_assign, name, "unassign")
-                                                st.session_state["schedule_df"] = updated
-                                                st.rerun()
-                                else:
-                                    st.markdown(
-                                        '<div style="color:#9ca3af;font-size:12px;padding:6px 0;text-align:center;">אין חריצים פנויים</div>',
-                                        unsafe_allow_html=True,
-                                    )
+                            _open_flights = sorted(_open_slots["טיסה"].astype(str).str.strip().unique().tolist())
+                            if _open_flights:
+                                _sel = st.selectbox("", ["— שבץ לטיסה —"] + _open_flights,
+                                                    key=f"assign_sel_{btn_key}", label_visibility="collapsed")
+                                if _sel != "— שבץ לטיסה —":
+                                    if st.button("✅ שבץ", key=f"assign_btn_{btn_key}", use_container_width=True):
+                                        _slot = st.session_state["schedule_df"][
+                                            (st.session_state["schedule_df"]["טיסה"].astype(str).str.strip() == _sel.strip()) &
+                                            st.session_state["schedule_df"]["עובד"].astype(str).str.contains("❌", na=False) &
+                                            (st.session_state["schedule_df"]["תפקיד בסיס"].astype(str).apply(normalize_role_label) == _search_role)
+                                        ]
+                                        if not _slot.empty:
+                                            _updated = do_swap(st.session_state["schedule_df"], _slot.index[0], name, "unassign")
+                                            st.session_state["schedule_df"] = _updated
+                                            st.rerun()
 
         # ── Tab: הפסקות חובה ──────────────────────────────────────────────────
         with tab_breaks:
