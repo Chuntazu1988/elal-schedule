@@ -351,15 +351,9 @@ if not daily_file or not employees_file:
 
     if _goto_gantt and not show_upload:
         # קבצים לא טעונים — מבקשים טעינה קודם
-        st.markdown(
-            '<div style="direction:rtl;background:#0d1f30;border:1px solid rgba(0,201,190,.3);'
-            'border-radius:14px;padding:18px 22px;margin:20px 0 12px;text-align:right;">'
-            '<div style="font-size:18px;font-weight:900;color:#00c9be;margin-bottom:6px;">📅 גאנט עובדים</div>'
-            '<div style="color:rgba(200,220,240,.75);font-size:14px;">כדי לראות את הגאנט יש לטעון קבצים תחילה.</div>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
         st.session_state["show_upload_form"] = True
+        st.session_state["show_gantt_page"]  = True  # שמור לאחר הטעינה
+        st.rerun()
 
     if not show_upload and not _goto_gantt:
         # ── Hero iframe — logo + grid + divider, no button, compact ──
@@ -1657,7 +1651,9 @@ with col_btn_auto:
             st.session_state["schedule_df"]    = schedule_df.copy()
             st.session_state["flights_snap"]   = flights_editor_df.copy()
             st.session_state["employees_snap"] = employees_df.copy()
-            st.success("השיבוץ נבנה בהצלחה.")
+            if _goto_gantt:
+                st.session_state["show_gantt_page"] = True
+            st.rerun()
         except Exception as exc:
             st.error("הייתה שגיאה בבניית השיבוץ.")
             st.exception(exc)
