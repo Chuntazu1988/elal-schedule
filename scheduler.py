@@ -429,31 +429,37 @@ def sort_candidates(candidates, assignments, role, task_start=None, task_end=Non
     candidates["_shift_priority"] = candidates.apply(shift_priority, axis=1)
 
     def dual_qual_score(emp_row):
-        is_tsa = str(emp_row.get("מפקח TSA", emp_row.get("מפקח tsa", ""))).strip() == "כן"
-        is_tl  = str(emp_row.get("ראש צוות", "")).strip() == "כן"
-        if is_tsa and is_tl:
-            if role == "מפקח TSA":  return 0
-            if role == "ראש צוות": return 1
+        # מיועד למקרה שעובד מוסמך גם כמפקח TSA וגם כראש צוות —
+        # בשיבוץ ל-TSA הוא מועדף (כי ראש צוות יתפוס אותו אחר כך);
+        # לוגיקה זו מוחלפת ע"י _role_fit למטה ונשמרת לתאימות אחורה בלבד.
         return 0
 
-    candidates["_dual_qual"] = candidates.apply(dual_qual_score, axis=1)
+    candidates["_dual_qual"] = 0  # לא בשימוש — _role_fit מטפל בכל סדרי העדיפות
 
-    sort_cols_base = ["_dual_qual", "_shift_priority", "_area_penalty", "_nearby_tasks", "_shift_proximity", "_task_count"]
+    # ── עדיפות לרצים (ראש צוות) לפי היררכיה ──────────────────────────────
+    # ראש צוות → מפקח TSA (אם מוסמך) → מתאם תורים → דייל
+    # עובד שאינו ראש צוות מקבל 0 ותמיד יוקדם על פניהם בתפקידים משניים
+    def tl_opportunity_cost(emp_row):
+        is_tl  = str(emp_row.get("ראש צוות", "")).strip() == "כן"
+        if not is_tl:
+            return 0
+        is_tsa = str(emp_row.get("מפקח TSA", emp_row.get("מפקח tsa", ""))).strip() == "כן"
+        if role == "ראש צוות":                  return 0  # תפקיד ראשי
+        if role == "מפקח TSA" and is_tsa:        return 1  # עדיפות שנייה אם מוסמך
+        if role == "מתאם תורים":                 return 2  # עדיפות שלישית
+        if role == "דייל":                        return 3  # אחרון בתור
+        return 1
+
+    candidates["_role_fit"] = candidates.apply(tl_opportunity_cost, axis=1)
+
+    sort_cols_base = ["_role_fit", "_shift_priority", "_area_penalty", "_nearby_tasks", "_shift_proximity", "_task_count"]
 
     if role == "ראש צוות":
         candidates["_role_count"] = candidates["שם"].apply(
             lambda name: count_team_lead_tasks_local(assignments, name)
         )
         return candidates.sort_values(
-            ["_dual_qual", "_shift_priority", "_area_penalty", "_nearby_tasks", "_shift_proximity", "_role_count", "_task_count"]
-        )
-
-    if role == "דייל":
-        candidates["_role_fit"] = candidates.apply(
-            lambda row: 1 if str(row.get("ראש צוות", "")).strip() == "כן" else 0, axis=1
-        )
-        return candidates.sort_values(
-            ["_dual_qual", "_shift_priority", "_area_penalty", "_nearby_tasks", "_shift_proximity", "_role_fit", "_task_count"]
+            ["_role_fit", "_shift_priority", "_area_penalty", "_nearby_tasks", "_shift_proximity", "_role_count", "_task_count"]
         )
 
     return candidates.sort_values(sort_cols_base)
