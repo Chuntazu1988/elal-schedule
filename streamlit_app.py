@@ -391,6 +391,15 @@ if not daily_file or not employees_file:
 
     else:
         # ── Mini hero + uploaders ──
+        if _goto_gantt:
+            st.markdown(
+                '<div style="direction:rtl;background:#0d1f30;border:1px solid rgba(0,201,190,.3);'
+                'border-radius:12px;padding:14px 18px;margin:12px 0 8px;text-align:right;">'
+                '<span style="font-size:15px;font-weight:900;color:#00c9be;">📅 גאנט עובדים</span>'
+                '&nbsp;&nbsp;<span style="font-size:13px;color:rgba(200,220,240,.7);">— יש להזין קבצים תחילה</span>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
         _mini_css = """<style>
 #lp {
   min-height: unset !important;
