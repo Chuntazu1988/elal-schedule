@@ -272,6 +272,23 @@ if _lp_action:
         st.session_state["show_gantt_page"]  = True
     st.rerun()
 
+# ── גרירה בגאנט ─────────────────────────────────────────────────────────────
+_gantt_swap = st.query_params.get("gantt_swap", "")
+if _gantt_swap:
+    del st.query_params["gantt_swap"]
+    try:
+        import urllib.parse as _uparse
+        _parts     = _gantt_swap.split(":", 1)
+        _task_idx  = int(_parts[0])
+        _new_wrkr  = _uparse.unquote(_parts[1])
+        st.session_state["schedule_df"] = do_swap(
+            st.session_state["schedule_df"], _task_idx, _new_wrkr, "unassign"
+        )
+    except Exception:
+        pass
+    st.session_state["show_gantt_page"] = True
+    st.rerun()
+
 daily_file     = sidebar_daily or st.session_state.get("daily_file_obj")
 employees_file = sidebar_emp   or st.session_state.get("employees_file_obj")
 
@@ -1260,6 +1277,329 @@ if "_fids_combined_raw" in st.session_state:
                                 st.rerun()
 
 
+def _render_interactive_gantt(live_schedule, schedule_df):
+    """גאנט אינטראקטיבי: ציר זמן קבוע, זיהוי חפיפות, גרירה לעובד אחר."""
+    import urllib.parse as _uparse
+
+    ROLE_COLORS_G = {
+        "ראש צוות":   "#8e24aa",
+        "דיילת":      "#5b9bd5",
+        "דייל":       "#5b9bd5",
+        "מתאם תורים": "#f0a000",
+        "מפקח TSA":   "#d32f2f",
+        "שומר TSA":   "#2e7d32",
+        'טרייני ר"צ': "#f9a825",
+        "טרייני רצ":  "#f9a825",
+    }
+
+    timed_g = live_schedule[live_schedule["התחלה"].astype(str).str.strip() != ""].copy()
+    if timed_g.empty:
+        st.info("אין נתוני שיבוץ להצגה בגאנט.")
+        return
+
+    all_s = pd.to_datetime(timed_g["התחלה"], format="%H:%M", errors="coerce")
+    all_e = pd.to_datetime(timed_g["סיום"],   format="%H:%M", errors="coerce")
+    g_min = max(int(all_s.dt.hour.min()) - 1, 0)
+    g_max = min(int(all_e.dt.hour.max()) + 2, 24)
+
+    all_workers = sorted([w for w in timed_g["עובד"].unique() if "❌" not in str(w)])
+
+    workers_data = []
+    for worker in all_workers:
+        tasks = timed_g[timed_g["עובד"] == worker]
+        tlist = []
+        for row_idx, task in tasks.iterrows():
+            role  = normalize_role_label(str(task.get("תפקיד בסיס", "")))
+            flight_raw = str(task.get("טיסה", "")).strip()
+            # check for FIDS ETD override in schedule_df
+            try:
+                sched_row = schedule_df.loc[row_idx]
+                etd_start = str(sched_row.get("התחלה", task.get("התחלה", "")))
+                etd_end   = str(sched_row.get("סיום",   task.get("סיום",   "")))
+            except Exception:
+                etd_start = str(task.get("התחלה", ""))
+                etd_end   = str(task.get("סיום",   ""))
+            tlist.append({
+                "idx":    int(row_idx),
+                "flight": flight_raw.replace("LY", "").strip(),
+                "role":   role,
+                "start":  etd_start,
+                "end":    etd_end,
+                "color":  ROLE_COLORS_G.get(role, "#4a7fa5"),
+                "orig_start": str(task.get("התחלה", "")),
+                "orig_end":   str(task.get("סיום",   "")),
+            })
+        workers_data.append({"name": worker, "tasks": tlist})
+
+    gdata    = _json.dumps(workers_data,  ensure_ascii=False)
+    rcolors  = _json.dumps(ROLE_COLORS_G, ensure_ascii=False)
+    base_url = "?"   # relative — will be used with parent.location
+
+    n_workers = len(all_workers)
+    gantt_h   = max(520, n_workers * 50 + 100)
+
+    gantt_html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+*{{box-sizing:border-box;margin:0;padding:0;}}
+body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;direction:rtl;}}
+#wrap{{overflow:auto;max-height:{gantt_h - 20}px;border-radius:14px;border:1px solid #1a2d42;}}
+#inner{{position:relative;}}
+/* ─── Time axis header ──────────────────── */
+.hdr-row{{
+  display:flex;position:sticky;top:0;z-index:20;
+  background:#04080f;border-bottom:2px solid #0d3050;
+}}
+.hdr-lbl{{
+  width:140px;min-width:140px;flex-shrink:0;
+  background:#04080f;border-right:2px solid #0d3050;
+}}
+.hdr-hours{{position:relative;flex:1;height:32px;}}
+.h-tick{{
+  position:absolute;top:0;height:100%;
+  border-left:1px solid #0d3050;
+  display:flex;align-items:center;padding-left:4px;
+  font-size:11px;color:rgba(0,201,190,.7);font-weight:700;
+  white-space:nowrap;
+}}
+/* ─── Worker rows ────────────────────────── */
+.wrow{{
+  display:flex;align-items:stretch;min-height:50px;
+  border-bottom:1px solid #0d1f2d;transition:background .15s;
+}}
+.wrow:nth-child(even){{background:rgba(0,40,70,.18);}}
+.wrow:hover{{background:rgba(0,201,190,.05);}}
+.wrow.drag-over{{background:rgba(0,201,190,.14)!important;outline:2px dashed rgba(0,201,190,.5);}}
+.wlabel{{
+  width:140px;min-width:140px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:flex-end;
+  padding:4px 10px;border-right:2px solid #0d3050;
+  position:sticky;left:0;background:#04080f;
+  font-size:12px;font-weight:800;color:#c8d8ec;z-index:5;
+  text-align:right;
+}}
+.timeline{{position:relative;flex:1;height:50px;}}
+/* vertical grid lines on timeline */
+.v-line{{
+  position:absolute;top:0;bottom:0;
+  border-left:1px solid rgba(13,48,80,.6);pointer-events:none;
+}}
+/* ─── Task blocks ────────────────────────── */
+.task{{
+  position:absolute;top:9px;height:32px;
+  border-radius:8px;display:flex;align-items:center;
+  justify-content:center;font-size:10.5px;font-weight:800;
+  color:rgba(255,255,255,.92);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;padding:0 7px;
+  box-shadow:0 2px 8px rgba(0,0,0,.35);
+  cursor:grab;transition:opacity .15s,box-shadow .15s;
+  border:1.5px solid transparent;
+}}
+.task:hover{{opacity:.88;box-shadow:0 4px 14px rgba(0,0,0,.5);}}
+.task:active{{cursor:grabbing;opacity:.75;}}
+.task.etd-changed{{border-color:#f59e0b!important;box-shadow:0 0 8px rgba(245,158,11,.4)!important;}}
+.task.overlap{{border-color:#ef4444!important;box-shadow:0 0 10px rgba(239,68,68,.5)!important;}}
+/* ─── Legend ─────────────────────────────── */
+#legend{{
+  display:flex;flex-wrap:wrap;gap:10px;padding:10px 14px 8px;
+  border-bottom:1px solid #0d1f2d;background:#04080f;
+  position:sticky;top:32px;z-index:15;
+}}
+.leg-item{{display:flex;align-items:center;gap:5px;font-size:11px;color:#8a9ab5;}}
+.leg-dot{{width:12px;height:12px;border-radius:4px;}}
+/* ─── Tooltip ────────────────────────────── */
+#tip{{
+  position:fixed;background:#0d1f30;color:#cdd8e8;
+  border:1px solid #00c9be;border-radius:10px;padding:8px 12px;
+  font-size:12px;direction:rtl;text-align:right;
+  pointer-events:none;z-index:999;display:none;
+  line-height:1.6;min-width:180px;
+  box-shadow:0 6px 20px rgba(0,0,0,.5);
+}}
+</style></head>
+<body>
+<div id="tip"></div>
+<div id="wrap"><div id="inner"></div></div>
+<script>
+const WORKERS={gdata};
+const RCOLORS={rcolors};
+const DAY_MIN={g_min},DAY_MAX={g_max},HOURS=DAY_MAX-DAY_MIN;
+const HPX=90,LW=140;
+const TOTAL_W=LW+HOURS*HPX+20;
+
+function h2px(s){{
+  if(!s||s==="nan")return 0;
+  const p=s.split(":");
+  return(parseInt(p[0]||0)+parseInt(p[1]||0)/60-DAY_MIN)*HPX;
+}}
+function t2min(s){{
+  if(!s||s==="nan")return 0;
+  const p=s.split(":");
+  return parseInt(p[0]||0)*60+parseInt(p[1]||0);
+}}
+
+// ─── Detect overlaps per worker ──
+WORKERS.forEach(w=>{{
+  const tasks=w.tasks;
+  for(let i=0;i<tasks.length;i++){{
+    const a=tasks[i];
+    const as=t2min(a.start),ae=t2min(a.end);
+    for(let j=i+1;j<tasks.length;j++){{
+      const b=tasks[j];
+      const bs=t2min(b.start),be=t2min(b.end);
+      if(as<be&&ae>bs){{ a.overlap=true; b.overlap=true; }}
+    }}
+    a.etd_changed=(a.start!==a.orig_start||a.end!==a.orig_end);
+  }}
+}});
+
+const inner=document.getElementById("inner");
+inner.style.cssText=`position:relative;min-width:${{TOTAL_W}}px;`;
+
+// ─── Header row with hour labels ──
+const hdrRow=document.createElement("div");
+hdrRow.className="hdr-row";
+const hdrLbl=document.createElement("div");
+hdrLbl.className="hdr-lbl";
+hdrRow.appendChild(hdrLbl);
+const hdrHrs=document.createElement("div");
+hdrHrs.className="hdr-hours";
+hdrHrs.style.width=`${{HOURS*HPX+20}}px`;
+for(let h=0;h<=HOURS;h++){{
+  const tick=document.createElement("div");
+  tick.className="h-tick";
+  tick.style.left=(h*HPX)+"px";
+  tick.textContent=String(DAY_MIN+h).padStart(2,"0")+":00";
+  hdrHrs.appendChild(tick);
+}}
+hdrRow.appendChild(hdrHrs);
+inner.appendChild(hdrRow);
+
+// ─── Legend ──
+const legend=document.createElement("div");
+legend.id="legend";
+Object.entries(RCOLORS).forEach(([role,color])=>{{
+  const li=document.createElement("div");li.className="leg-item";
+  const dot=document.createElement("div");dot.className="leg-dot";
+  dot.style.background=color;
+  li.appendChild(dot);
+  const span=document.createElement("span");span.textContent=role;
+  li.appendChild(span);
+  legend.appendChild(li);
+}});
+const liOv=document.createElement("div");liOv.className="leg-item";
+liOv.innerHTML='<div class="leg-dot" style="background:#ef4444;border:2px solid #ef4444;"></div><span>חפיפה</span>';
+legend.appendChild(liOv);
+const liChg=document.createElement("div");liChg.className="leg-item";
+liChg.innerHTML='<div class="leg-dot" style="background:#f59e0b;border:2px solid #f59e0b;"></div><span>ETD עודכן</span>';
+legend.appendChild(liChg);
+inner.appendChild(legend);
+
+// ─── Tooltip ──
+const tip=document.getElementById("tip");
+function showTip(e,html){{
+  tip.innerHTML=html;tip.style.display="block";
+  tip.style.left=(e.clientX+14)+"px";tip.style.top=(e.clientY-10)+"px";
+}}
+document.addEventListener("mousemove",e=>{{
+  if(tip.style.display!=="none"){{
+    tip.style.left=(e.clientX+14)+"px";tip.style.top=(e.clientY-10)+"px";
+  }}
+}});
+document.addEventListener("mouseleave",()=>tip.style.display="none");
+
+// ─── Drag state ──
+let dragInfo=null;
+
+// ─── Worker rows ──
+WORKERS.forEach(w=>{{
+  const row=document.createElement("div");
+  row.className="wrow";
+  row.dataset.worker=w.name;
+
+  // Worker label
+  const lbl=document.createElement("div");
+  lbl.className="wlabel";lbl.textContent=w.name;
+  row.appendChild(lbl);
+
+  // Timeline
+  const tl=document.createElement("div");
+  tl.className="timeline";
+  tl.style.width=(HOURS*HPX+20)+"px";
+
+  // Vertical grid lines
+  for(let h=0;h<=HOURS;h++){{
+    const vl=document.createElement("div");
+    vl.className="v-line";vl.style.left=(h*HPX)+"px";
+    tl.appendChild(vl);
+  }}
+
+  // Task blocks
+  w.tasks.forEach(t=>{{
+    const x1=h2px(t.start),x2=h2px(t.end);
+    const bw=Math.max(x2-x1,8);
+    const d=document.createElement("div");
+    d.className="task"+(t.overlap?" overlap":"")+(t.etd_changed?" etd-changed":"");
+    d.style.cssText=`left:${{x1.toFixed(1)}}px;width:${{bw.toFixed(1)}}px;background:${{t.color}};`;
+    d.textContent=t.flight||t.role.substring(0,4);
+    d.dataset.idx=t.idx;
+    d.dataset.worker=w.name;
+    d.dataset.role=t.role;
+    d.setAttribute("draggable","true");
+
+    // Tooltip
+    d.addEventListener("mouseenter",e=>{{
+      const chg=t.etd_changed?`<br>⚠️ ETD שונה: ${{t.orig_start}}–${{t.orig_end}} → ${{t.start}}–${{t.end}}`:"";
+      const ov=t.overlap?`<br>🔴 חפיפה עם משימה אחרת`:"";
+      showTip(e,`<strong>${{t.flight||"—"}}</strong><br>${{t.role}}<br>🕐 ${{t.start}} – ${{t.end}}${{chg}}${{ov}}`);
+    }});
+    d.addEventListener("mouseleave",()=>tip.style.display="none");
+
+    // Drag
+    d.addEventListener("dragstart",e=>{{
+      dragInfo={{idx:t.idx,worker:w.name,role:t.role}};
+      e.dataTransfer.effectAllowed="move";
+      e.dataTransfer.setData("text/plain",t.idx);
+      d.style.opacity="0.5";
+    }});
+    d.addEventListener("dragend",()=>{{ d.style.opacity="1"; dragInfo=null; }});
+
+    tl.appendChild(d);
+  }});
+
+  // Drop zone on row
+  row.addEventListener("dragover",e=>{{
+    if(dragInfo&&dragInfo.worker!==w.name){{
+      e.preventDefault();
+      e.dataTransfer.dropEffect="move";
+      row.classList.add("drag-over");
+    }}
+  }});
+  row.addEventListener("dragleave",()=>row.classList.remove("drag-over"));
+  row.addEventListener("drop",e=>{{
+    e.preventDefault();
+    row.classList.remove("drag-over");
+    if(dragInfo&&dragInfo.worker!==w.name){{
+      const encoded=dragInfo.idx+":"+encodeURIComponent(w.name);
+      window.parent.location.href=window.parent.location.href.split("?")[0]+"?gantt_swap="+encoded;
+    }}
+  }});
+
+  row.appendChild(tl);
+  inner.appendChild(row);
+}});
+</script></body></html>"""
+
+    st.download_button(
+        "⬇️ הורד גאנט כ-HTML",
+        data=gantt_html.encode("utf-8"),
+        file_name="gantt.html", mime="text/html",
+        use_container_width=True,
+    )
+    st.caption(f"📊 {n_workers} עובדים · {g_min:02d}:00–{g_max:02d}:00 · גרור משימה לשורה אחרת לשינוי שיבוץ")
+    _components.html(gantt_html, height=gantt_h, scrolling=True)
+
+
+
 def recompute_from_schedule(schedule_df, flights_df, employees_df):
     labeled_df    = build_next_task_labels(schedule_df, employees_df)
     workload_df   = build_workload(schedule_df, employees_df)
@@ -1410,101 +1750,8 @@ if "schedule_df" in st.session_state:
 
         # ── Tab: גאנט ────────────────────────────────────────────────────────
         with tab_gantt:
-            timed_g = live_schedule[live_schedule["התחלה"].astype(str).str.strip() != ""].copy()
+            _render_interactive_gantt(live_schedule, st.session_state["schedule_df"])
 
-            if timed_g.empty:
-                st.info("אין נתוני שיבוץ להצגה.")
-            else:
-                ROLE_COLORS_G = {
-                    "ראש צוות":   "#8e24aa",
-                    "דיילת":      "#5b9bd5",
-                    "דייל":       "#5b9bd5",
-                    "מתאם תורים": "#f0a000",
-                    "מפקח TSA":   "#d32f2f",
-                    "שומר TSA":   "#2e7d32",
-                    "טרייני ר״צ": "#f9a825",
-                    "טרייני רצ":  "#f9a825",
-                }
-                all_s = pd.to_datetime(timed_g["התחלה"], format="%H:%M", errors="coerce")
-                all_e = pd.to_datetime(timed_g["סיום"],   format="%H:%M", errors="coerce")
-                g_min = max(int(all_s.dt.hour.min()) - 1, 0)
-                g_max = min(int(all_e.dt.hour.max()) + 2, 24)
-
-                all_workers = sorted(
-                    [w for w in timed_g["עובד"].unique() if "❌" not in str(w)]
-                )
-                workers_data = []
-                for worker in all_workers:
-                    tasks = timed_g[timed_g["עובד"] == worker]
-                    tlist = []
-                    for idx, task in tasks.iterrows():
-                        role = normalize_role_label(str(task.get("תפקיד בסיס", "")))
-                        tlist.append({
-                            "flight": str(task.get("טיסה", "")).replace("LY", "").strip(),
-                            "role":   role,
-                            "start":  str(task.get("התחלה", "")),
-                            "end":    str(task.get("סיום", "")),
-                            "color":  ROLE_COLORS_G.get(role, "#9fb7d7"),
-                        })
-                    workers_data.append({"name": worker, "tasks": tlist})
-
-                gdata   = _json.dumps(workers_data,  ensure_ascii=False)
-                rcolors = _json.dumps(ROLE_COLORS_G, ensure_ascii=False)
-
-                gantt_page = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8">
-<title>גאנט</title>
-<style>
-*{{box-sizing:border-box;margin:0;padding:0;}}
-body{{font-family:Arial,sans-serif;background:#f4f7fb;padding:10px;}}
-#gantt{{overflow-x:auto;border:1px solid #d9e2ef;border-radius:14px;background:#fff;}}
-#inner{{position:relative;}}
-.hour-line{{position:absolute;top:0;bottom:0;border-left:1px solid #e8eef7;pointer-events:none;}}
-.hour-label{{position:absolute;top:5px;font-size:11px;color:#8a9ab5;}}
-.wrow{{display:flex;align-items:stretch;border-bottom:1px solid #eef2f8;min-height:44px;}}
-.wrow:nth-child(even){{background:#f8fbff;}}
-.wlabel{{width:120px;min-width:120px;display:flex;align-items:center;justify-content:flex-end;
-         padding:4px 8px;border-right:2px solid #e0e8f4;position:sticky;left:0;
-         font-size:12px;font-weight:900;color:#071b3a;text-align:right;direction:rtl;
-         background:inherit;}}
-.timeline{{position:relative;flex:1;height:44px;}}
-.task{{position:absolute;height:28px;border-radius:7px;display:flex;align-items:center;
-       justify-content:center;font-size:10px;font-weight:800;color:white;
-       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 5px;
-       box-shadow:0 2px 5px rgba(0,0,0,0.15);}}
-</style></head><body>
-<div id="gantt"><div id="inner"></div></div>
-<script>
-const WORKERS={gdata},COLORS={rcolors};
-const DAY_MIN={g_min},DAY_MAX={g_max},HOURS=DAY_MAX-DAY_MIN,HPX=90,LW=120,HDR=26;
-function h2px(s){{const[h,m]=(s||"0:0").split(":").map(Number);return(h+m/60-DAY_MIN)*HPX;}}
-const inner=document.getElementById("inner");
-inner.style.cssText=`position:relative;width:${{LW+HOURS*HPX+20}}px;padding-top:${{HDR}}px;`;
-for(let h=0;h<=HOURS;h++){{
-  const x=LW+h*HPX;
-  const ln=document.createElement("div");ln.className="hour-line";ln.style.left=x+"px";inner.appendChild(ln);
-  const lb=document.createElement("div");lb.className="hour-label";lb.style.left=(x+3)+"px";
-  lb.textContent=String(DAY_MIN+h).padStart(2,"0")+":00";inner.appendChild(lb);
-}}
-WORKERS.forEach(w=>{{
-  const row=document.createElement("div");row.className="wrow";
-  const lbl=document.createElement("div");lbl.className="wlabel";lbl.textContent=w.name;row.appendChild(lbl);
-  const tl=document.createElement("div");tl.className="timeline";
-  w.tasks.forEach(t=>{{
-    const x1=h2px(t.start),x2=h2px(t.end),bw=Math.max(x2-x1,6);
-    const d=document.createElement("div");d.className="task";
-    d.style.cssText=`left:${{x1.toFixed(1)}}px;width:${{bw.toFixed(1)}}px;top:7px;background:${{t.color}};`;
-    d.textContent=t.flight;d.title=`${{w.name}} | ${{t.role}} | ${{t.start}}–${{t.end}}`;
-    tl.appendChild(d);
-  }});
-  row.appendChild(tl);inner.appendChild(row);
-}});
-</script></body></html>"""
-
-                st.download_button("⬇️ הורד גאנט כקובץ HTML", data=gantt_page.encode("utf-8"),
-                                   file_name="gantt_workers.html", mime="text/html", use_container_width=True)
-                st.caption(f"מציג {len(all_workers)} עובדים")
-                _components.html(gantt_page, height=max(500, len(all_workers) * 48 + 120), scrolling=False)
 
             st.subheader("❌ חוסרים")
             if missing.empty:
