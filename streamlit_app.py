@@ -294,6 +294,36 @@ employees_file = sidebar_emp   or st.session_state.get("employees_file_obj")
 
 _goto_gantt = st.session_state.get("show_gantt_page", False)
 
+# ── גאנט מלא — מסך נפרד לפני כל UI אחר ─────────────────────────────────────
+if _goto_gantt and "schedule_df" in st.session_state and daily_file and employees_file:
+    st.session_state.pop("show_gantt_page", None)
+    # הסתר את כל ה-UI של Streamlit
+    st.markdown("""<style>
+    section[data-testid="stSidebar"],
+    header[data-testid="stHeader"],
+    #MainMenu, footer,
+    [data-testid="stToolbar"],
+    [data-testid="stDecoration"],
+    [data-testid="stStatusWidget"]
+    { display:none !important; }
+    .stApp, [data-testid="stAppViewContainer"],
+    [data-testid="stMain"], [data-testid="block-container"]
+    { padding:0 !important; margin:0 !important; max-width:100% !important; }
+    </style>""", unsafe_allow_html=True)
+
+    _back_col, _title_col = st.columns([1, 9])
+    with _back_col:
+        if st.button("← חזרה", key="gantt_back_early"):
+            st.rerun()
+    with _title_col:
+        st.markdown('<div style="direction:rtl;font-size:18px;font-weight:900;color:#00c9be;padding:4px 0;">📅 גאנט עובדים</div>', unsafe_allow_html=True)
+
+    import pandas as _pd_g
+    _sched  = st.session_state["schedule_df"]
+    _miss   = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
+    _render_interactive_gantt(_sched, _sched, missing_df=_miss)
+    st.stop()
+
 if not daily_file or not employees_file:
     import re as _re
 
@@ -1470,6 +1500,16 @@ body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;d
 <div id="wrap"><div id="inner"></div></div>
 <div id="tray" style="display:none"><div id="tray-title">✈️ טיסות ללא שיבוץ — גרור לשורת עובד</div><div id="tray-cards"></div></div>
 <script>
+const ROLE_ABBR={{
+  "ראש צוות":   'ר"צ',
+  "דיילת":      "דייל",
+  "דייל":       "דייל",
+  "מתאם תורים": "מתאם",
+  "מפקח TSA":   "מפקח",
+  "שומר TSA":   "שומר",
+  'טרייני ר"צ': "טרייני",
+  "טרייני רצ":  "טרייני",
+}};
 const WORKERS={gdata};
 const RCOLORS={rcolors};
 const DAY_MIN={g_min},DAY_MAX={g_max},HOURS=DAY_MAX-DAY_MIN;
@@ -1590,7 +1630,9 @@ WORKERS.forEach(w=>{{
     const d=document.createElement("div");
     d.className="task"+(t.overlap?" overlap":"")+(t.etd_changed?" etd-changed":"");
     d.style.cssText=`left:${{x1.toFixed(1)}}px;width:${{bw.toFixed(1)}}px;background:${{t.color}};`;
-    d.textContent=t.flight||t.role.substring(0,4);
+    const abbr = ROLE_ABBR[t.role] || t.role.substring(0,4);
+    const label = t.flight ? t.flight + " · " + abbr : abbr;
+    d.textContent = label;
     d.dataset.idx=t.idx;
     d.dataset.worker=w.name;
     d.dataset.role=t.role;
