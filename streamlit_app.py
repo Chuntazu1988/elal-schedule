@@ -128,6 +128,7 @@ body{font-family:"Inter","Heebo",Arial,sans-serif;background:#04080f;overflow-x:
   transition:transform .25s,background .25s,border-color .25s,box-shadow .25s;
   cursor:default;position:relative;overflow:hidden;
 }
+.lp-card-link{ cursor:pointer !important; }
 .lp-card::after{
   content:"";position:absolute;inset:0;
   background:radial-gradient(circle at 50% 0%,rgba(0,201,190,.1),transparent 70%);
@@ -183,8 +184,8 @@ body{font-family:"Inter","Heebo",Arial,sans-serif;background:#04080f;overflow-x:
   <div class="lp-tag">Airport Operations &middot; Smart Scheduling</div>
 
   <div class="lp-grid">
-    <div class="lp-card"><span class="lp-card-icon">🚀</span><p class="lp-card-title">שיבוץ אוטומטי</p><p class="lp-card-desc">הקצאת עובדים לטיסות לפי הכשרות ומשמרות</p></div>
-    <div class="lp-card"><span class="lp-card-icon">📅</span><p class="lp-card-title">גאנט עובדים</p><p class="lp-card-desc">ויזואליזציה של כל המשימות ביום</p></div>
+    <a href="?action=build" target="_parent" style="text-decoration:none;display:contents;"><div class="lp-card lp-card-link"><span class="lp-card-icon">🚀</span><p class="lp-card-title">שיבוץ אוטומטי</p><p class="lp-card-desc">הקצאת עובדים לטיסות לפי הכשרות ומשמרות</p></div></a>
+    <a href="?action=gantt" target="_parent" style="text-decoration:none;display:contents;"><div class="lp-card lp-card-link"><span class="lp-card-icon">📅</span><p class="lp-card-title">גאנט עובדים</p><p class="lp-card-desc">ויזואליזציה של כל המשימות ביום</p></div></a>
     <div class="lp-card"><span class="lp-card-icon">🛡️</span><p class="lp-card-title">ניהול TSA</p><p class="lp-card-desc">מפקחים ושומרים לטיסות ארה"ב</p></div>
     <div class="lp-card"><span class="lp-card-icon">⏰</span><p class="lp-card-title">הפסקות חובה</p><p class="lp-card-desc">מעקב הפסקות לפי אורך משמרת</p></div>
     <div class="lp-card"><span class="lp-card-icon">🔄</span><p class="lp-card-title">החלפת עובדים</p><p class="lp-card-desc">גמישות בזמן אמת לשינוי שיבוצים</p></div>
@@ -261,13 +262,23 @@ if sidebar_confirm:
     st.session_state.pop("_refresh_diff", None)
 
 
+# ── טיפול בפעולות מכפתורי עמוד הנחיתה ───────────────────────────────────
+_lp_action = st.query_params.get("action", "")
+if _lp_action:
+    del st.query_params["action"]
+    if _lp_action == "build":
+        st.session_state["show_upload_form"] = True
+    elif _lp_action == "gantt":
+        st.session_state["show_gantt_page"]  = True
+    st.rerun()
+
 daily_file     = sidebar_daily or st.session_state.get("daily_file_obj")
 employees_file = sidebar_emp   or st.session_state.get("employees_file_obj")
 
 if not daily_file or not employees_file:
     import re as _re
 
-    show_upload = st.session_state.get("show_upload_form", False) or st.session_state.get("show_gantt_page", False)
+    show_upload = st.session_state.get("show_upload_form", False)
 
     # ── Zero-gap dark background ──
     st.markdown("""
@@ -343,35 +354,12 @@ if not daily_file or not employees_file:
             height=590, scrolling=False,
         )
 
-        # ── שני כפתורי ניווט ראשיים ──
-        st.markdown("<div style='height:32px;background:#04080f'></div>", unsafe_allow_html=True)
-        st.markdown("""
-        <style>
-        div[data-testid="stHorizontalBlock"] > div:first-child > div[data-testid="stButton"] > button {
-            background: linear-gradient(135deg,#00c9be,#00a89e) !important;
-            color:#04080f !important; font-weight:900 !important; font-size:16px !important;
-            border:none !important; border-radius:16px !important; padding:18px 0 !important;
-            letter-spacing:1px !important;
-        }
-        div[data-testid="stHorizontalBlock"] > div:last-child > div[data-testid="stButton"] > button {
-            background: transparent !important;
-            color:rgba(0,201,190,.85) !important; font-weight:800 !important; font-size:16px !important;
-            border:2px solid rgba(0,201,190,.4) !important; border-radius:16px !important;
-            padding:18px 0 !important; letter-spacing:1px !important;
-        }
-        div[data-testid="stHorizontalBlock"] > div:last-child > div[data-testid="stButton"] > button:hover {
-            border-color:rgba(0,201,190,.85) !important;
-            color:#00c9be !important;
-        }
-        </style>""", unsafe_allow_html=True)
-        _, col_b1, _gap, col_b2, _ = st.columns([1, 3, 0.4, 3, 1])
-        with col_b1:
-            if st.button("🗂️  בניית שיבוץ", use_container_width=True, key="lp_build_btn"):
+        # ── Native Streamlit button — blends with dark bg ──
+        st.markdown("<div style='height:48px;background:#04080f'></div>", unsafe_allow_html=True)
+        _, col_btn, _ = st.columns([1, 1, 1])
+        with col_btn:
+            if st.button("✈️  Let's Fly", use_container_width=True, key="lf_btn"):
                 st.session_state["show_upload_form"] = True
-                st.rerun()
-        with col_b2:
-            if st.button("📅  Gantt", use_container_width=True, key="lp_gantt_btn"):
-                st.session_state["show_gantt_page"] = True
                 st.rerun()
         st.markdown("<div style='height:40px;background:#04080f'></div>", unsafe_allow_html=True)
 
