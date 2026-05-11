@@ -485,11 +485,11 @@ if _diff_to_show:
             _icon   = "🟢" if _dtype == "new" else ("🔴" if _dtype == "del" else "✅")
             _border = "#15803d" if _dtype == "new" else ("#b91c1c" if _dtype == "del" else "#ccc")
             _bg     = "rgba(21,128,61,.07)" if _dtype == "new" else ("rgba(185,28,28,.07)" if _dtype == "del" else "rgba(0,0,0,.03)")
+            _detail_html = ("<br><span style='font-size:10px;color:#888;'>" + _detail + "</span>") if _detail else ""
             st.markdown(
                 f'<div style="direction:rtl;font-size:12px;color:{_color};margin:3px 0;'
                 f'background:{_bg};border-right:3px solid {_border};border-radius:4px;padding:4px 8px;">'
-                f'{_icon} <strong>{_label}</strong>'
-                f'{"<br><span style=\'font-size:10px;color:#888;\'>" + _detail + "</span>" if _detail else ""}'
+                f'{_icon} <strong>{_label}</strong>{_detail_html}'
                 f'</div>',
                 unsafe_allow_html=True,
             )
