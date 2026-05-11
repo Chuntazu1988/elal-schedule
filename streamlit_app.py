@@ -292,6 +292,8 @@ if _gantt_swap:
 daily_file     = sidebar_daily or st.session_state.get("daily_file_obj")
 employees_file = sidebar_emp   or st.session_state.get("employees_file_obj")
 
+_goto_gantt = st.session_state.get("show_gantt_page", False)
+
 if not daily_file or not employees_file:
     import re as _re
 
