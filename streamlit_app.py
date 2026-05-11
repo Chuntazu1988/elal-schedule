@@ -267,7 +267,7 @@ employees_file = sidebar_emp   or st.session_state.get("employees_file_obj")
 if not daily_file or not employees_file:
     import re as _re
 
-    show_upload = st.session_state.get("show_upload_form", False)
+    show_upload = st.session_state.get("show_upload_form", False) or st.session_state.get("show_gantt_page", False)
 
     # ── Zero-gap dark background ──
     st.markdown("""
@@ -343,12 +343,35 @@ if not daily_file or not employees_file:
             height=590, scrolling=False,
         )
 
-        # ── Native Streamlit button — blends with dark bg ──
-        st.markdown("<div style='height:48px;background:#04080f'></div>", unsafe_allow_html=True)
-        _, col_btn, _ = st.columns([1, 1, 1])
-        with col_btn:
-            if st.button("✈️  Let's Fly", use_container_width=True, key="lf_btn"):
+        # ── שני כפתורי ניווט ראשיים ──
+        st.markdown("<div style='height:32px;background:#04080f'></div>", unsafe_allow_html=True)
+        st.markdown("""
+        <style>
+        div[data-testid="stHorizontalBlock"] > div:first-child > div[data-testid="stButton"] > button {
+            background: linear-gradient(135deg,#00c9be,#00a89e) !important;
+            color:#04080f !important; font-weight:900 !important; font-size:16px !important;
+            border:none !important; border-radius:16px !important; padding:18px 0 !important;
+            letter-spacing:1px !important;
+        }
+        div[data-testid="stHorizontalBlock"] > div:last-child > div[data-testid="stButton"] > button {
+            background: transparent !important;
+            color:rgba(0,201,190,.85) !important; font-weight:800 !important; font-size:16px !important;
+            border:2px solid rgba(0,201,190,.4) !important; border-radius:16px !important;
+            padding:18px 0 !important; letter-spacing:1px !important;
+        }
+        div[data-testid="stHorizontalBlock"] > div:last-child > div[data-testid="stButton"] > button:hover {
+            border-color:rgba(0,201,190,.85) !important;
+            color:#00c9be !important;
+        }
+        </style>""", unsafe_allow_html=True)
+        _, col_b1, _gap, col_b2, _ = st.columns([1, 3, 0.4, 3, 1])
+        with col_b1:
+            if st.button("🗂️  בניית שיבוץ", use_container_width=True, key="lp_build_btn"):
                 st.session_state["show_upload_form"] = True
+                st.rerun()
+        with col_b2:
+            if st.button("📅  Gantt", use_container_width=True, key="lp_gantt_btn"):
+                st.session_state["show_gantt_page"] = True
                 st.rerun()
         st.markdown("<div style='height:40px;background:#04080f'></div>", unsafe_allow_html=True)
 
@@ -1540,59 +1563,10 @@ WORKERS.forEach(w=>{{
             shift_map_ref = build_shift_map_from_excel(daily_file)
             unassigned_df = build_unassigned_agents(live_schedule, live_employees, shift_map_ref)
 
-            # ── תקציר מצב ────────────────────────────────────────────────────
-            _on_break_now = {
-                n for n, info in st.session_state["break_log"].items()
-                if info.get("ts") and not info.get("end_ts")
-            }
-            _in_flights = live_schedule[
-                (~live_schedule["עובד"].astype(str).str.contains("❌", na=False)) &
-                (live_schedule["עובד"].astype(str).str.strip() != "")
-            ]["עובד"].nunique()
-            _at_counters = len(unassigned_df[~unassigned_df["שם"].isin(_on_break_now)])
-
-            if st.button("🔄 מצב עכשיו", use_container_width=True, key="snapshot_btn"):
-                st.session_state["snapshot"] = {
-                    "flights":  _in_flights,
-                    "counters": _at_counters,
-                    "breaks":   len(_on_break_now),
-                    "time":     datetime.now().strftime("%H:%M:%S"),
-                    "names":    list(_on_break_now),
-                }
-
-            if "snapshot" in st.session_state:
-                _snap = st.session_state["snapshot"]
-                _names_line = (
-                    f'<div style="font-size:11px;color:#92400e;margin-top:8px;">☕ בהפסקה: {", ".join(_snap["names"])}</div>'
-                    if _snap["names"] else ""
-                )
-                st.markdown(
-                    f'<div style="direction:rtl;background:#f0f9ff;border:1px solid #bae6fd;'
-                    f'border-radius:12px;padding:14px 18px;margin:8px 0 12px 0;">'
-                    f'<div style="font-size:11px;color:#64748b;margin-bottom:10px;">📍 נכון לשעה {_snap["time"]}</div>'
-                    f'<div style="display:flex;gap:24px;justify-content:center;flex-wrap:wrap;">'
-                    f'<div style="text-align:center;"><div style="font-size:32px;font-weight:900;color:#0369a1;">{_snap["flights"]}</div>'
-                    f'<div style="font-size:12px;color:#475569;font-weight:700;">✈️ בטיסות</div></div>'
-                    f'<div style="text-align:center;"><div style="font-size:32px;font-weight:900;color:#0f766e;">{_snap["counters"]}</div>'
-                    f'<div style="font-size:12px;color:#475569;font-weight:700;">🏢 בדלפקים</div></div>'
-                    f'<div style="text-align:center;"><div style="font-size:32px;font-weight:900;color:#b45309;">{_snap["breaks"]}</div>'
-                    f'<div style="font-size:12px;color:#475569;font-weight:700;">☕ בהפסקה</div></div>'
-                    f'</div>' + _names_line + f'</div>',
-                    unsafe_allow_html=True,
-                )
-            st.markdown("---")
-
             if unassigned_df.empty:
                 st.success("כל העובדים שובצו לטיסות 🎉")
             else:
-                _cf, _ct = st.columns([4, 1])
-                with _cf:
-                    _role_f = st.radio("סנן:", ["הכל", "דייל", "ראש צוות"],
-                                       horizontal=True, key="unassigned_role_f")
-                with _ct:
-                    st.metric("סה״כ לא משובצים", len(unassigned_df))
-                if _role_f != "הכל":
-                    unassigned_df = unassigned_df[unassigned_df["תפקיד"] == _role_f]
+                st.metric("סה״כ לא משובצים", len(unassigned_df))
                 st.markdown("---")
                 for shift_label, group in unassigned_df.groupby("משמרת"):
                     start_h = shift_label.split("-")[0] if "-" in shift_label else "00:00"
@@ -1712,7 +1686,7 @@ WORKERS.forEach(w=>{{
                                 unsafe_allow_html=True,
                             )
 
-                        col_start, col_end, col_reset, col_assign = st.columns([2, 2, 1, 3])
+                        col_start, col_end, col_reset = st.columns([2, 2, 1])
                         with col_start:
                             if not on_break and not break_done:
                                 if st.button("▶ התחל הפסקה", key=f"brk_start_{btn_key}", use_container_width=True):
@@ -1732,28 +1706,6 @@ WORKERS.forEach(w=>{{
                                 if st.button("↺", key=f"brk_reset_{btn_key}", help="אפס הפסקה"):
                                     st.session_state["break_log"].pop(name, None)
                                     st.rerun()
-                        with col_assign:
-                            _srole = "ראש צוות" if role == "ראש צוות" else "דייל"
-                            _slots = live_schedule[
-                                (live_schedule["עובד"].astype(str).str.contains("❌", na=False)) &
-                                (live_schedule["תפקיד בסיס"].astype(str).apply(normalize_role_label) == _srole)
-                            ]
-                            _flights = sorted(_slots["טיסה"].astype(str).str.strip().unique().tolist())
-                            if _flights:
-                                _sel = st.selectbox("", ["— שבץ לטיסה —"] + _flights,
-                                                    key=f"asgn_{btn_key}", label_visibility="collapsed")
-                                if _sel != "— שבץ לטיסה —":
-                                    if st.button("✅ שבץ", key=f"asgn_btn_{btn_key}", use_container_width=True):
-                                        _s = st.session_state["schedule_df"][
-                                            (st.session_state["schedule_df"]["טיסה"].astype(str).str.strip() == _sel.strip()) &
-                                            (st.session_state["schedule_df"]["עובד"].astype(str).str.contains("❌", na=False)) &
-                                            (st.session_state["schedule_df"]["תפקיד בסיס"].astype(str).apply(normalize_role_label) == _srole)
-                                        ]
-                                        if not _s.empty:
-                                            st.session_state["schedule_df"] = do_swap(
-                                                st.session_state["schedule_df"], _s.index[0], name, "unassign"
-                                            )
-                                            st.rerun()
 
         # ── Tab: הפסקות חובה ──────────────────────────────────────────────────
         with tab_breaks:
