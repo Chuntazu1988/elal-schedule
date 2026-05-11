@@ -1550,10 +1550,36 @@ WORKERS.forEach(w=>{{
                 (live_schedule["עובד"].astype(str).str.strip() != "")
             ]["עובד"].nunique()
             _at_counters = len(unassigned_df[~unassigned_df["שם"].isin(_on_break_now)])
-            _c1, _c2, _c3 = st.columns(3)
-            _c1.metric("✈️ בטיסות",  _in_flights)
-            _c2.metric("🏢 בדלפקים", _at_counters)
-            _c3.metric("☕ בהפסקה",  len(_on_break_now))
+
+            if st.button("🔄 מצב עכשיו", use_container_width=True, key="snapshot_btn"):
+                st.session_state["snapshot"] = {
+                    "flights":  _in_flights,
+                    "counters": _at_counters,
+                    "breaks":   len(_on_break_now),
+                    "time":     datetime.now().strftime("%H:%M:%S"),
+                    "names":    list(_on_break_now),
+                }
+
+            if "snapshot" in st.session_state:
+                _snap = st.session_state["snapshot"]
+                _names_line = (
+                    f'<div style="font-size:11px;color:#92400e;margin-top:8px;">☕ בהפסקה: {", ".join(_snap["names"])}</div>'
+                    if _snap["names"] else ""
+                )
+                st.markdown(
+                    f'<div style="direction:rtl;background:#f0f9ff;border:1px solid #bae6fd;'
+                    f'border-radius:12px;padding:14px 18px;margin:8px 0 12px 0;">'
+                    f'<div style="font-size:11px;color:#64748b;margin-bottom:10px;">📍 נכון לשעה {_snap["time"]}</div>'
+                    f'<div style="display:flex;gap:24px;justify-content:center;flex-wrap:wrap;">'
+                    f'<div style="text-align:center;"><div style="font-size:32px;font-weight:900;color:#0369a1;">{_snap["flights"]}</div>'
+                    f'<div style="font-size:12px;color:#475569;font-weight:700;">✈️ בטיסות</div></div>'
+                    f'<div style="text-align:center;"><div style="font-size:32px;font-weight:900;color:#0f766e;">{_snap["counters"]}</div>'
+                    f'<div style="font-size:12px;color:#475569;font-weight:700;">🏢 בדלפקים</div></div>'
+                    f'<div style="text-align:center;"><div style="font-size:32px;font-weight:900;color:#b45309;">{_snap["breaks"]}</div>'
+                    f'<div style="font-size:12px;color:#475569;font-weight:700;">☕ בהפסקה</div></div>'
+                    f'</div>' + _names_line + f'</div>',
+                    unsafe_allow_html=True,
+                )
             st.markdown("---")
 
             if unassigned_df.empty:
