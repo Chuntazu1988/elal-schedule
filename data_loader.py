@@ -429,8 +429,19 @@ def normalize_employees(df):
         return s
     df["זמינות"] = df["זמינות"].apply(clean_avail)
 
-    # נרמל כפילויות לפי name_key — כך "שחר פרגסליך" ו"פרגסליך שחר" מזוהים כאותו עובד
+    # נרמל כפילויות —
+    # _dedup_key: מילות השם ממוינות, כך ש"שני פדידה" ו"פדידה שני" מקבלות אותו מפתח.
+    # לשמות עם שם אמצעי (3+ מילים): נשתמש רק בשם הראשון והאחרון לצורך הדה-דופ,
+    # כך ש"טליה חנה טטרואשוילי" ו"טטרואשוילי טליה" מזוהות כאותו עובד.
+    def _dedup_key(full_name: str) -> str:
+        parts = [name_key(w) for w in full_name.split() if len(w) > 1]
+        if len(parts) >= 3:
+            parts = [parts[0], parts[-1]]
+        return "".join(sorted(parts))
+
     df["_name_key"] = df["שם"].apply(name_key)
-    df = df.drop_duplicates(subset=["_name_key"], keep="first").reset_index(drop=True)
+    df["_dedup_key"] = df["שם"].apply(_dedup_key)
+    df = df.drop_duplicates(subset=["_dedup_key"], keep="first").reset_index(drop=True)
+    df = df.drop(columns=["_dedup_key"])
 
     return df
