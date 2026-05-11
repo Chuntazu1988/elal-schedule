@@ -1359,17 +1359,25 @@ def _render_interactive_gantt(live_schedule, schedule_df):
     gantt_html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
 *{{box-sizing:border-box;margin:0;padding:0;}}
-body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;direction:rtl;}}
-#wrap{{overflow:auto;max-height:{gantt_h - 20}px;border-radius:14px;border:1px solid #1a2d42;}}
-#inner{{position:relative;}}
-/* ─── Time axis header ──────────────────── */
+html,body{{height:100%;overflow:hidden;}}
+body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;direction:ltr;}}
+/* ── outer scroll container ── */
+#wrap{{
+  position:fixed;top:0;left:0;right:0;bottom:0;
+  overflow-y:auto;overflow-x:auto;
+  border:1px solid #1a2d42;
+}}
+#inner{{position:relative;min-width:max-content;}}
+/* ─── Time axis header — sticky top ─── */
 .hdr-row{{
-  display:flex;position:sticky;top:0;z-index:20;
+  display:flex;position:sticky;top:0;z-index:30;
   background:#04080f;border-bottom:2px solid #0d3050;
+  min-width:max-content;
 }}
 .hdr-lbl{{
-  width:140px;min-width:140px;flex-shrink:0;
+  width:150px;min-width:150px;flex-shrink:0;
   background:#04080f;border-right:2px solid #0d3050;
+  position:sticky;left:0;z-index:31;
 }}
 .hdr-hours{{position:relative;flex:1;height:32px;}}
 .h-tick{{
@@ -1379,29 +1387,39 @@ body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;d
   font-size:11px;color:rgba(0,201,190,.7);font-weight:700;
   white-space:nowrap;
 }}
-/* ─── Worker rows ────────────────────────── */
+/* ─── Legend — sticky below header ─── */
+#legend{{
+  display:flex;flex-wrap:wrap;gap:10px;padding:8px 14px;
+  border-bottom:1px solid #0d1f2d;background:#04080f;
+  position:sticky;top:32px;z-index:20;
+  min-width:max-content;
+}}
+.leg-item{{display:flex;align-items:center;gap:5px;font-size:11px;color:#8a9ab5;}}
+.leg-dot{{width:12px;height:12px;border-radius:4px;}}
+/* ─── Worker rows ─── */
 .wrow{{
   display:flex;align-items:stretch;min-height:50px;
   border-bottom:1px solid #0d1f2d;transition:background .15s;
+  min-width:max-content;
 }}
 .wrow:nth-child(even){{background:rgba(0,40,70,.18);}}
 .wrow:hover{{background:rgba(0,201,190,.05);}}
 .wrow.drag-over{{background:rgba(0,201,190,.14)!important;outline:2px dashed rgba(0,201,190,.5);}}
+/* שם עובד — צד שמאל, קבוע בגלילה אופקית */
 .wlabel{{
-  width:140px;min-width:140px;flex-shrink:0;
-  display:flex;align-items:center;justify-content:flex-end;
+  width:150px;min-width:150px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:flex-start;
   padding:4px 10px;border-right:2px solid #0d3050;
   position:sticky;left:0;background:#04080f;
   font-size:12px;font-weight:800;color:#c8d8ec;z-index:5;
-  text-align:right;
+  text-align:left;direction:rtl;
 }}
 .timeline{{position:relative;flex:1;height:50px;}}
-/* vertical grid lines on timeline */
 .v-line{{
   position:absolute;top:0;bottom:0;
   border-left:1px solid rgba(13,48,80,.6);pointer-events:none;
 }}
-/* ─── Task blocks ────────────────────────── */
+/* ─── Task blocks ─── */
 .task{{
   position:absolute;top:9px;height:32px;
   border-radius:8px;display:flex;align-items:center;
@@ -1416,15 +1434,7 @@ body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;d
 .task:active{{cursor:grabbing;opacity:.75;}}
 .task.etd-changed{{border-color:#f59e0b!important;box-shadow:0 0 8px rgba(245,158,11,.4)!important;}}
 .task.overlap{{border-color:#ef4444!important;box-shadow:0 0 10px rgba(239,68,68,.5)!important;}}
-/* ─── Legend ─────────────────────────────── */
-#legend{{
-  display:flex;flex-wrap:wrap;gap:10px;padding:10px 14px 8px;
-  border-bottom:1px solid #0d1f2d;background:#04080f;
-  position:sticky;top:32px;z-index:15;
-}}
-.leg-item{{display:flex;align-items:center;gap:5px;font-size:11px;color:#8a9ab5;}}
-.leg-dot{{width:12px;height:12px;border-radius:4px;}}
-/* ─── Tooltip ────────────────────────────── */
+/* ─── Tooltip ─── */
 #tip{{
   position:fixed;background:#0d1f30;color:#cdd8e8;
   border:1px solid #00c9be;border-radius:10px;padding:8px 12px;
@@ -1614,7 +1624,7 @@ WORKERS.forEach(w=>{{
         use_container_width=True,
     )
     st.caption(f"📊 {n_workers} עובדים · {g_min:02d}:00–{g_max:02d}:00 · גרור משימה לשורה אחרת לשינוי שיבוץ")
-    _components.html(gantt_html, height=gantt_h, scrolling=True)
+    _components.html(gantt_html, height=800, scrolling=False)
 
 
 
