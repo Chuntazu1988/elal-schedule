@@ -34,7 +34,6 @@ from display import (
     render_flight_card, render_flight_card_with_swap,
     to_excel_bytes,
 )
-from file_diff import store_snapshot, show_file_diff
 
 # =========================
 # PAGE CONFIG
@@ -215,18 +214,33 @@ with st.sidebar:
     sidebar_fids1 = st.file_uploader("קובץ FIDS – יום נוכחי", type=None, key="sidebar_fids1")
     sidebar_fids2 = st.file_uploader("קובץ FIDS – יום הבא (טיסות אחרי חצות)", type=None, key="sidebar_fids2")
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    # ── הצגת קבצים טעונים כרגע ────────────────────────────────────────────
+    _loaded_daily = st.session_state.get("_daily_file_name")
+    _loaded_emp   = st.session_state.get("_emp_file_name")
+    if _loaded_daily or _loaded_emp:
+        st.markdown(
+            '<div style="direction:rtl;font-size:11px;color:#888;margin-bottom:4px;">קבצים טעונים:</div>',
+            unsafe_allow_html=True,
+        )
+        for _fname in filter(None, [_loaded_daily, _loaded_emp]):
+            st.markdown(
+                f'<div style="direction:rtl;font-size:11px;background:rgba(0,201,190,.08);'
+                f'border-right:3px solid #00c9be;border-radius:4px;padding:3px 7px;margin-bottom:3px;'
+                f'color:#0f6e56;font-weight:600;">📄 {_fname}</div>',
+                unsafe_allow_html=True,
+            )
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
     st.caption("לאחר העלאת הקבצים הדרושים יש ללחוץ על אשר וטען קבצים.")
     sidebar_confirm = st.button("✅ אשר וטען קבצים", use_container_width=True, key="sidebar_confirm")
 
 if sidebar_confirm:
-    # ── שמור גרסה קודמת לפני החלפת הקבצים ────────────────────────────────
-    store_snapshot("daily")
-    store_snapshot("employees")
-    # ─────────────────────────────────────────────────────────────────────
+    _is_refresh = "daily_file_obj" in st.session_state or "employees_file_obj" in st.session_state
     if sidebar_daily:
-        st.session_state["daily_file_obj"] = sidebar_daily
+        st.session_state["daily_file_obj"]    = sidebar_daily
+        st.session_state["_daily_file_name"]  = sidebar_daily.name
     if sidebar_emp:
         st.session_state["employees_file_obj"] = sidebar_emp
+        st.session_state["_emp_file_name"]     = sidebar_emp.name
     if sidebar_fids1:
         st.session_state["fids_file1_bytes"] = sidebar_fids1.read()
         st.session_state["fids_file1_name"]  = sidebar_fids1.name
@@ -241,6 +255,10 @@ if sidebar_confirm:
         st.session_state.pop("fids_file2_name",  None)
     st.session_state.pop("fids_applied", None)
     st.session_state.pop("_fids_combined_raw", None)
+    # סמן רענון רק אם כבר היו קבצים טעונים (לא טעינה ראשונה)
+    if _is_refresh:
+        st.session_state["_refresh_triggered"] = True
+    st.session_state.pop("_refresh_diff", None)
 
 
 daily_file     = sidebar_daily or st.session_state.get("daily_file_obj")
@@ -407,17 +425,77 @@ try:
     shift_map = build_shift_map_from_excel(daily_file)
     daily_file.seek(0)
     employees_df = apply_shift_map_to_employees(employees_df, shift_map)
-
-    # ── הצג שינויים ביחס לגרסה הקודמת (אם הועלה קובץ חדש) ───────────────
-    show_file_diff("📋 שינויים בסידור יומי",  "daily",     flights_df)
-    show_file_diff("👥 שינויים בקובץ עובדים", "employees", employees_df)
-    # ─────────────────────────────────────────────────────────────────────
 except Exception as exc:
     st.error("לא הצלחתי לקרוא את הקבצים.")
     st.exception(exc)
     st.stop()
 
-# ── Initialize removal state ──────────────────────────────────────────────────
+# ── זיהוי שינויים לאחר רענון קבצים ─────────────────────────────────────────
+_refresh_triggered = st.session_state.pop("_refresh_triggered", False)
+_prev_emp_df = st.session_state.get("_cached_employees_df")
+_prev_flt_df = st.session_state.get("_cached_flights_df")
+
+if _refresh_triggered and (_prev_emp_df is not None or _prev_flt_df is not None):
+    _diff_lines = []
+
+    # השוואת עובדים
+    if _prev_emp_df is not None and "שם" in _prev_emp_df.columns and "שם" in employees_df.columns:
+        _prev_names = set(_prev_emp_df["שם"].astype(str).str.strip())
+        _curr_names = set(employees_df["שם"].astype(str).str.strip())
+        _added_emp   = _curr_names - _prev_names
+        _removed_emp = _prev_names - _curr_names
+        if _added_emp:
+            _detail = "، ".join(sorted(_added_emp)[:4]) + ("..." if len(_added_emp) > 4 else "")
+            _diff_lines.append(("new", f"{len(_added_emp)} עובד/ת נוסף/ה", _detail))
+        if _removed_emp:
+            _detail = "، ".join(sorted(_removed_emp)[:4]) + ("..." if len(_removed_emp) > 4 else "")
+            _diff_lines.append(("del", f"{len(_removed_emp)} עובד/ת הוסר/ה", _detail))
+        if not _added_emp and not _removed_emp:
+            _diff_lines.append(("same", "עובדים – ללא שינוי", ""))
+
+    # השוואת טיסות
+    if _prev_flt_df is not None and "טיסה" in _prev_flt_df.columns and "טיסה" in flights_df.columns:
+        _prev_flights = set(_prev_flt_df["טיסה"].astype(str).str.strip())
+        _curr_flights = set(flights_df["טיסה"].astype(str).str.strip())
+        _added_flt   = _curr_flights - _prev_flights
+        _removed_flt = _prev_flights - _curr_flights
+        if _added_flt:
+            _detail = "، ".join(sorted(_added_flt)[:4]) + ("..." if len(_added_flt) > 4 else "")
+            _diff_lines.append(("new", f"{len(_added_flt)} טיסה/ות נוספה/ו", _detail))
+        if _removed_flt:
+            _detail = "، ".join(sorted(_removed_flt)[:4]) + ("..." if len(_removed_flt) > 4 else "")
+            _diff_lines.append(("del", f"{len(_removed_flt)} טיסה/ות הוסרה/ו", _detail))
+        if not _added_flt and not _removed_flt:
+            _diff_lines.append(("same", "טיסות – ללא שינוי", ""))
+
+    st.session_state["_refresh_diff"] = _diff_lines
+
+# שמור cache של הנתונים הנוכחיים לשימוש ברענון הבא
+st.session_state["_cached_employees_df"] = employees_df.copy()
+st.session_state["_cached_flights_df"]   = flights_df.copy()
+
+# ── הצגת diff בסיידבר ──────────────────────────────────────────────────────
+_diff_to_show = st.session_state.get("_refresh_diff")
+if _diff_to_show:
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("**🔄 שינויים לאחר רענון**")
+        for _dtype, _label, _detail in _diff_to_show:
+            _color  = "#15803d" if _dtype == "new" else ("#b91c1c" if _dtype == "del" else "#555")
+            _icon   = "🟢" if _dtype == "new" else ("🔴" if _dtype == "del" else "✅")
+            _border = "#15803d" if _dtype == "new" else ("#b91c1c" if _dtype == "del" else "#ccc")
+            _bg     = "rgba(21,128,61,.07)" if _dtype == "new" else ("rgba(185,28,28,.07)" if _dtype == "del" else "rgba(0,0,0,.03)")
+            st.markdown(
+                f'<div style="direction:rtl;font-size:12px;color:{_color};margin:3px 0;'
+                f'background:{_bg};border-right:3px solid {_border};border-radius:4px;padding:4px 8px;">'
+                f'{_icon} <strong>{_label}</strong>'
+                f'{"<br><span style=\'font-size:10px;color:#888;\'>" + _detail + "</span>" if _detail else ""}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        if st.button("✕ סגור", key="close_refresh_diff", use_container_width=True):
+            st.session_state.pop("_refresh_diff", None)
+            st.rerun()
 if "removed_employees" not in st.session_state:
     st.session_state["removed_employees"] = {}
 
@@ -912,7 +990,7 @@ if clear_clicked:
     st.session_state.pop("_fids_combined_raw", None)
     st.rerun()
 
-m1, m2, m3, m4 = st.columns(4)
+m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("טיסות", len(flights_editor_df))
 m2.metric("עובדים", len(employees_df))
 m3.metric("יעדי TSA", flights_editor_df["יעד"].isin(list(USA_TSA_DESTS)).sum())
@@ -921,6 +999,7 @@ m4.metric(
     (employees_df["טרייני רצ"].astype(str).str.strip() == "כן").sum()
     if "טרייני רצ" in employees_df.columns else 0,
 )
+m5.metric("הורדו ממשמרת", len(st.session_state.get("removed_employees", {})))
 
 
 # ── FIDS ↔ Schedule comparison ───────────────────────────────────────────────
