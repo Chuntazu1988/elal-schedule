@@ -1295,7 +1295,7 @@ if "_fids_combined_raw" in st.session_state:
                                 st.rerun()
 
 
-def _render_interactive_gantt(live_schedule, schedule_df):
+def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
     """גאנט אינטראקטיבי: ציר זמן קבוע, זיהוי חפיפות, גרירה לעובד אחר."""
     import urllib.parse as _uparse
 
@@ -1359,14 +1359,35 @@ def _render_interactive_gantt(live_schedule, schedule_df):
     gantt_html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
 *{{box-sizing:border-box;margin:0;padding:0;}}
-html,body{{height:100%;overflow:hidden;}}
-body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;direction:ltr;}}
+html,body{{height:100%;margin:0;overflow:hidden;}}
+body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;direction:ltr;display:flex;flex-direction:column;}}
 /* ── outer scroll container ── */
 #wrap{{
-  position:fixed;top:0;left:0;right:0;bottom:0;
-  overflow-y:auto;overflow-x:auto;
+  flex:1;overflow-y:auto;overflow-x:auto;min-height:0;
   border:1px solid #1a2d42;
 }}
+/* ── unassigned flights tray ── */
+#tray{{
+  flex-shrink:0;background:#0a1628;border-top:2px solid #0d3050;
+  padding:10px 14px;max-height:140px;overflow-x:auto;overflow-y:hidden;
+}}
+#tray-title{{
+  font-size:11px;font-weight:800;color:rgba(0,201,190,.7);
+  margin-bottom:8px;letter-spacing:.5px;
+}}
+#tray-cards{{display:flex;gap:8px;align-items:center;flex-wrap:nowrap;min-width:max-content;}}
+.tray-card{{
+  padding:6px 14px;border-radius:8px;
+  font-size:11px;font-weight:800;color:#fff;
+  cursor:grab;border:1.5px solid rgba(255,255,255,.2);
+  background:#374151;white-space:nowrap;
+  box-shadow:0 2px 6px rgba(0,0,0,.4);
+  transition:opacity .15s,transform .1s;
+  display:flex;flex-direction:column;align-items:center;gap:2px;
+}}
+.tray-card:hover{{opacity:.85;transform:translateY(-2px);}}
+.tray-card:active{{cursor:grabbing;opacity:.6;}}
+.tray-card .tc-time{{font-size:9px;font-weight:600;color:rgba(255,255,255,.6);}}
 #inner{{position:relative;min-width:max-content;}}
 /* ─── Time axis header — sticky top ─── */
 .hdr-row{{
@@ -1447,6 +1468,7 @@ body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;d
 <body>
 <div id="tip"></div>
 <div id="wrap"><div id="inner"></div></div>
+<div id="tray" style="display:none"><div id="tray-title">✈️ טיסות ללא שיבוץ — גרור לשורת עובד</div><div id="tray-cards"></div></div>
 <script>
 const WORKERS={gdata};
 const RCOLORS={rcolors};
@@ -1615,6 +1637,30 @@ WORKERS.forEach(w=>{{
   row.appendChild(tl);
   inner.appendChild(row);
 }});
+// ── Tray: unassigned flights ──────────────────────────────────
+if(MISSING && MISSING.length > 0){{
+  const tray = document.getElementById("tray");
+  const cards = document.getElementById("tray-cards");
+  tray.style.display = "block";
+  MISSING.forEach(m => {{
+    const card = document.createElement("div");
+    card.className = "tray-card";
+    card.setAttribute("draggable","true");
+    card.dataset.idx = m.idx;
+    card.dataset.role = m.role;
+    card.dataset.isMissing = "1";
+    card.style.background = m.color || "#1e3a5f";
+    card.innerHTML = `<span>${{m.flight || m.role}}</span><span class="tc-time">${{m.start}}–${{m.end}}</span>`;
+
+    card.addEventListener("dragstart", e => {{
+      dragInfo = {{idx: m.idx, worker: "__missing__", role: m.role, isMissing: true}};
+      e.dataTransfer.effectAllowed = "move";
+      card.style.opacity = "0.4";
+    }});
+    card.addEventListener("dragend", () => {{ card.style.opacity = "1"; dragInfo = null; }});
+    cards.appendChild(card);
+  }});
+}}
 </script></body></html>"""
 
     st.download_button(
@@ -1623,8 +1669,27 @@ WORKERS.forEach(w=>{{
         file_name="gantt.html", mime="text/html",
         use_container_width=True,
     )
-    st.caption(f"📊 {n_workers} עובדים · {g_min:02d}:00–{g_max:02d}:00 · גרור משימה לשורה אחרת לשינוי שיבוץ")
-    _components.html(gantt_html, height=800, scrolling=False)
+    # ── missing flights data ──
+    missing_flights_data = []
+    if missing_df is not None and not missing_df.empty:
+        for _, mrow in missing_df.iterrows():
+            role  = normalize_role_label(str(mrow.get("תפקיד בסיס", "")))
+            missing_flights_data.append({
+                "idx":    int(mrow.name),
+                "flight": str(mrow.get("טיסה", "")).replace("LY","").strip(),
+                "role":   role,
+                "start":  str(mrow.get("התחלה", "")),
+                "end":    str(mrow.get("סיום",   "")),
+                "color":  "#374151",
+            })
+
+    missing_json = _json.dumps(missing_flights_data, ensure_ascii=False)
+    gantt_html_final = gantt_html.replace(
+        "const WORKERS=",
+        f"const MISSING={missing_json};\nconst WORKERS="
+    )
+
+    _components.html(gantt_html_final, height=0, scrolling=False)
 
 
 
@@ -1672,8 +1737,7 @@ with col_btn_auto:
             st.session_state["schedule_df"]    = schedule_df.copy()
             st.session_state["flights_snap"]   = flights_editor_df.copy()
             st.session_state["employees_snap"] = employees_df.copy()
-            if _goto_gantt:
-                st.session_state["show_gantt_page"] = True
+            st.session_state["show_gantt_page"] = True
             st.rerun()
         except Exception as exc:
             st.error("הייתה שגיאה בבניית השיבוץ.")
@@ -1761,7 +1825,7 @@ if "schedule_df" in st.session_state:
                     'color:#00c9be;padding:4px 0;">📅 גאנט עובדים</div>',
                     unsafe_allow_html=True,
                 )
-            _render_interactive_gantt(live_schedule, st.session_state["schedule_df"])
+            _render_interactive_gantt(live_schedule, st.session_state["schedule_df"], missing_df=missing)
             st.stop()
 
         (tab_schedule, tab_gantt, tab_missing, tab_available,
