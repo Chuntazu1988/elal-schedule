@@ -295,7 +295,8 @@ employees_file = sidebar_emp   or st.session_state.get("employees_file_obj")
 if not daily_file or not employees_file:
     import re as _re
 
-    show_upload = st.session_state.get("show_upload_form", False)
+    show_upload   = st.session_state.get("show_upload_form", False)
+    _goto_gantt   = st.session_state.get("show_gantt_page",  False)
 
     # ── Zero-gap dark background ──
     st.markdown("""
@@ -348,7 +349,19 @@ if not daily_file or not employees_file:
     div[data-testid="stFileUploaderDropzoneInstructions"] small { color:rgba(255,255,255,.5) !important; }
     </style>""", unsafe_allow_html=True)
 
-    if not show_upload:
+    if _goto_gantt and not show_upload:
+        # קבצים לא טעונים — מבקשים טעינה קודם
+        st.markdown(
+            '<div style="direction:rtl;background:#0d1f30;border:1px solid rgba(0,201,190,.3);'
+            'border-radius:14px;padding:18px 22px;margin:20px 0 12px;text-align:right;">'
+            '<div style="font-size:18px;font-weight:900;color:#00c9be;margin-bottom:6px;">📅 גאנט עובדים</div>'
+            '<div style="color:rgba(200,220,240,.75);font-size:14px;">כדי לראות את הגאנט יש לטעון קבצים תחילה.</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        st.session_state["show_upload_form"] = True
+
+    if not show_upload and not _goto_gantt:
         # ── Hero iframe — logo + grid + divider, no button, compact ──
         _hero_css = """<style>
 #lp {
@@ -1716,6 +1729,22 @@ if "schedule_df" in st.session_state:
             live_schedule, live_flights, live_employees
         )
         missing = live_schedule[live_schedule["עובד"].astype(str).str.contains("❌", na=False)]
+
+        # ── Auto-navigate to Gantt tab if requested ─────────────────────────
+        if _goto_gantt:
+            st.session_state.pop("show_gantt_page", None)
+            _components.html("""<script>
+(function(){
+  function clickGantt(){
+    var tabs=window.parent.document.querySelectorAll('[data-baseweb="tab"]');
+    for(var i=0;i<tabs.length;i++){
+      if(tabs[i].textContent.includes("גאנט")){tabs[i].click();return;}
+    }
+    setTimeout(clickGantt,150);
+  }
+  setTimeout(clickGantt,400);
+})();
+</script>""", height=0)
 
         (tab_schedule, tab_gantt, tab_missing, tab_available,
          tab_unassigned, tab_breaks, tab_workload, tab_continuity, tab_raw) = st.tabs([
