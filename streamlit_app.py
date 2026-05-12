@@ -1363,7 +1363,14 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
                 "orig_start": str(task.get("התחלה", "")),
                 "orig_end":   str(task.get("סיום",   "")),
             })
-        workers_data.append({"name": worker, "tasks": tlist})
+        # shift hours from live_employees
+        _emp_row = live_schedule[live_schedule["עובד"] == worker]
+        _shift_s, _shift_e = "", ""
+        if not _emp_row.empty:
+            _first = _emp_row.iloc[0]
+            _shift_s = str(_first.get("תחילת משמרת", "")).strip()
+            _shift_e = str(_first.get("סוף משמרת",   "")).strip()
+        workers_data.append({"name": worker, "tasks": tlist, "shift_start": _shift_s, "shift_end": _shift_e})
 
     gdata    = _json.dumps(workers_data,  ensure_ascii=False)
     rcolors  = _json.dumps(ROLE_COLORS_G, ensure_ascii=False)
@@ -1472,6 +1479,18 @@ body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;d
 .task.etd-changed{{border-color:#f59e0b!important;box-shadow:0 0 8px rgba(245,158,11,.4)!important;}}
 .task.overlap{{border-color:#ef4444!important;box-shadow:0 0 10px rgba(239,68,68,.5)!important;}}
 /* ─── Tooltip ─── */
+/* ─── Shift popup ─── */
+#shift-pop{{
+  position:absolute;
+  background:#0d1f30;color:#c8d8ec;
+  border:1px solid rgba(0,201,190,.5);border-radius:10px;
+  padding:10px 14px;font-size:12px;direction:rtl;text-align:right;
+  z-index:100;min-width:130px;pointer-events:none;
+  box-shadow:0 6px 20px rgba(0,0,0,.55);
+  line-height:1.7;
+  transition:opacity .15s;
+}}
+#shift-pop.hidden{{display:none;}}
 #tip{{
   position:fixed;background:#0d1f30;color:#cdd8e8;
   border:1px solid #00c9be;border-radius:10px;padding:8px 12px;
@@ -1483,6 +1502,7 @@ body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;d
 </style></head>
 <body>
 <div id="tip"></div>
+<div id="shift-pop" class="hidden"></div>
 <div id="wrap"><div id="inner"></div></div>
 <div id="tray" style="display:none"><div id="tray-title">✈️ טיסות ללא שיבוץ — גרור לשורת עובד</div><div id="tray-cards"></div></div>
 <script>
@@ -1582,6 +1602,9 @@ document.addEventListener("mousemove",e=>{{
   }}
 }});
 document.addEventListener("mouseleave",()=>tip.style.display="none");
+document.addEventListener("click", function(){{
+  document.getElementById("shift-pop").classList.add("hidden");
+}});
 
 // ─── Drag state ──
 let dragInfo=null;
@@ -1595,6 +1618,22 @@ WORKERS.forEach(w=>{{
   // Worker label
   const lbl=document.createElement("div");
   lbl.className="wlabel";lbl.textContent=w.name;
+  lbl.style.cursor="pointer";
+  lbl.addEventListener("click", function(e){{
+    e.stopPropagation();
+    const pop = document.getElementById("shift-pop");
+    const rect = lbl.getBoundingClientRect();
+    const wrapRect = document.getElementById("wrap").getBoundingClientRect();
+    // position below the label
+    pop.style.top  = (rect.bottom - wrapRect.top + document.getElementById("wrap").scrollTop + 4) + "px";
+    pop.style.left = (rect.left   - wrapRect.left + 4) + "px";
+    const ss = w.shift_start || "—";
+    const se = w.shift_end   || "—";
+    pop.innerHTML = `<div style="font-weight:900;color:#00c9be;margin-bottom:4px;">${{w.name}}</div>`
+                  + `<div>🕐 משמרת</div>`
+                  + `<div style="font-size:13px;font-weight:800;">${{ss}} – ${{se}}</div>`;
+    pop.classList.remove("hidden");
+  }});
   row.appendChild(lbl);
 
   // Timeline
