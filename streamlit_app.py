@@ -1414,11 +1414,17 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
     g_min = 0  # always start from 00:00
     # g_max: ceiling of latest actual end time + 1h buffer
     if not all_e.empty:
-        _end_mins = all_e.dt.hour * 60 + all_e.dt.minute
-        _last_total = int(_end_mins.max())          # e.g. 22*60+45 = 1365
+        # overnight flights: end time < start time → end is next day (add 24h)
+        _s_mins = all_s.dt.hour * 60 + all_s.dt.minute
+        _e_mins = all_e.dt.hour * 60 + all_e.dt.minute
+        # for each task, if end < start and start is evening, treat end as +24h
+        _e_adjusted = _e_mins.copy()
+        _overnight = (_e_mins < _s_mins) & (_s_mins > 12 * 60)
+        _e_adjusted[_overnight] = _e_mins[_overnight] + 24 * 60
+        _last_total = int(_e_adjusted.max())
         _last_h = _last_total // 60
         _last_m = _last_total % 60
-        g_max = _last_h + (1 if _last_m == 0 else 2)  # ceiling + 1h buffer
+        g_max = _last_h + (1 if _last_m == 0 else 2)
         g_max = min(g_max, 30)
     else:
         g_max = 24
@@ -1575,10 +1581,18 @@ function hm2min(s){{
   if(!s||s==="nan")return-1;
   const p=s.split(":");return parseInt(p[0]||0)*60+parseInt(p[1]||0);
 }}
-function h2x(s){{
+function h2x(s, startS){{
+  // s = time string "HH:MM", startS = task start time (for overnight detection)
   if(!s||s==="nan")return-1;
   const p=s.split(":");
-  return(parseInt(p[0]||0)+parseInt(p[1]||0)/60-viewStart)*HPX;
+  let h=parseInt(p[0]||0)+parseInt(p[1]||0)/60;
+  // overnight: if end hour < start hour, add 24 (flight crosses midnight)
+  if(startS&&startS!=="nan"){{
+    const sp=startS.split(":");
+    const sh=parseInt(sp[0]||0)+parseInt(sp[1]||0)/60;
+    if(h<sh&&sh>12)h+=24; // only if start is in evening (>12)
+  }}
+  return(h-viewStart)*HPX;
 }}
 function shift(d){{
   viewStart=Math.max(G_MIN,Math.min(viewStart+d,G_MAX-VIEW));
@@ -1662,14 +1676,17 @@ function render(){{
       tl.appendChild(v);
     }}
     w.tasks.forEach(t=>{{
-      const x1=h2x(t.start),x2=h2x(t.end);
+      const x1=h2x(t.start,null),x2=h2x(t.end,t.start);
       // only hide if completely outside view (don't clip partial tasks)
       if(x2<0||x1>VIEW*HPX+160)return;
       const bw=Math.max(x2-Math.max(x1,0),6);
       const bx=Math.max(x1,0);
       const d=document.createElement("div");d.className="task";
-      const end=hm2min(t.end);
-      if(end>0&&end<nowMin)d.classList.add("departed");
+      let endMin=hm2min(t.end);
+      const startMin=hm2min(t.start);
+      // overnight: if end < start and start is evening, add 24h
+      if(endMin>=0&&startMin>12*60&&endMin<startMin)endMin+=24*60;
+      if(endMin>0&&endMin<nowMin)d.classList.add("departed");
       d.style.cssText=`left:${{bx.toFixed(1)}}px;width:${{bw.toFixed(1)}}px;background:${{t.color}}`;
       d.textContent=(end>0&&end<nowMin?"✈ ":"")+t.flight+(t.flight?" · ":"")+t.abbr;
       d.title=`${{w.name}} | ${{t.role}} | ${{t.start}}–${{t.end}}`;
