@@ -1367,7 +1367,24 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
     _last_m = int(_e_max.dt.minute.max())
     g_max = min(_last_h + (2 if _last_m > 0 else 1), 25)
 
-    all_workers = sorted([w for w in timed_g["עובד"].unique() if "❌" not in str(w) and str(w).strip() not in ("", "nan")])
+    # כל עובדים פעילים: מהסידור + מקובץ עובדים
+    _workers_with_tasks = set(
+        w for w in timed_g["עובד"].unique()
+        if "❌" not in str(w) and str(w).strip() not in ("", "nan")
+    )
+    _emp_snap2 = st.session_state.get("employees_snap")
+    _all_active = set(_workers_with_tasks)
+    if _emp_snap2 is not None and "שם" in _emp_snap2.columns:
+        # הוסף עובדים פעילים שיש להם משמרת (לא רק מהסידור)
+        _active_col = [c for c in ["סטטוס","פעיל","active","status"] if c in _emp_snap2.columns]
+        if _active_col:
+            _emp_active = _emp_snap2[_emp_snap2[_active_col[0]].astype(str).str.strip().isin(["פעיל","כן","active","yes","1","True"])]
+        else:
+            _emp_active = _emp_snap2  # אם אין עמודת סטטוס — כולם פעילים
+        for _n in _emp_active["שם"].tolist():
+            if str(_n).strip() and str(_n).strip() != "nan":
+                _all_active.add(str(_n).strip())
+    all_workers = sorted(list(_all_active))
 
     workers_data = []
     for worker in all_workers:
@@ -1509,7 +1526,7 @@ body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;d
   padding:4px 10px;border-right:2px solid #0d3050;
   position:sticky;left:0;background:#04080f;
   font-size:12px;font-weight:800;color:#c8d8ec;z-index:5;
-  text-align:left;direction:rtl;
+  text-align:left;direction:ltr;
 }}
 .timeline{{position:relative;flex:1;height:50px;}}
 .v-line{{
@@ -1545,7 +1562,7 @@ body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;d
   position:fixed;
   background:#0d1f30;color:#c8d8ec;
   border:1px solid rgba(0,201,190,.5);border-radius:10px;
-  padding:10px 14px;font-size:12px;direction:rtl;text-align:right;
+  padding:10px 14px;font-size:12px;direction:ltr;text-align:left;
   z-index:9999;min-width:150px;pointer-events:none;
   box-shadow:0 6px 20px rgba(0,0,0,.55);
   line-height:1.8;
@@ -1566,7 +1583,7 @@ body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;d
 <div id="controls" style="
   background:#04080f;padding:8px 14px;
   display:flex;align-items:center;gap:12px;justify-content:center;
-  border-bottom:1px solid #0d3050;flex-shrink:0;direction:rtl;
+  border-bottom:1px solid #0d3050;flex-shrink:0;direction:ltr;
 ">
   <button id="btn-back" onclick="shiftView(-3)" style="
     background:#0d1f30;color:#00c9be;border:1px solid rgba(0,201,190,.4);
@@ -1579,7 +1596,7 @@ body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;d
   ">3+ ››</button>
 </div>
 <div id="wrap" style="flex:1;overflow-y:auto;overflow-x:auto;min-height:0;border:1px solid #1a2d42;"><div id="inner"></div></div>
-<div id="tray" style="display:none"><div id="tray-title">✈️ טיסות ללא שיבוץ — גרור לשורת עובד</div><div id="tray-cards"></div></div>
+<div id="tray" style="display:none"><div id="tray-title" style="direction:ltr;text-align:left;">✈️ טיסות ללא שיבוץ — גרור לשורת עובד</div><div id="tray-cards"></div></div>
 <script>
 const ROLE_ABBR={{
   "ראש צוות":   'ר"צ',
@@ -1990,11 +2007,21 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
         if st.button("← חזרה", key="gantt_back_late"):
             st.rerun()
     with _tc:
-        st.markdown(
-            '<div style="direction:rtl;font-size:18px;font-weight:900;'
-            'color:#00c9be;padding:6px 0;">📅 גאנט עובדים</div>',
-            unsafe_allow_html=True,
-        )
+        # הצג הודעת swap אם יש
+        _smsg = st.session_state.pop("_gantt_swap_msg", "")
+        if _smsg:
+            _color = "#00c9be" if "✅" in _smsg else "#ef4444"
+            st.markdown(f'<div style="color:{_color};font-weight:800;font-size:14px;padding:4px 0;">{_smsg}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div style="direction:rtl;font-size:18px;font-weight:900;color:#00c9be;padding:6px 0;">📅 גאנט עובדים</div>', unsafe_allow_html=True)
+    # Bridge: listens for postMessage from blob gantt tab and triggers swap via query param
+    _components.html("""<script>
+window.addEventListener("message", function(e) {
+  if(e.data && e.data.type === "gantt_swap") {
+    window.location.href = window.location.href.split("?")[0] + "?gantt_swap=" + e.data.payload;
+  }
+});
+</script>""", height=0)
     _sched = st.session_state["schedule_df"]
     _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
     _render_interactive_gantt(_sched, _sched, missing_df=_miss)
