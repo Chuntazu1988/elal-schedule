@@ -1331,719 +1331,331 @@ if "_fids_combined_raw" in st.session_state:
 
 
 def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
-    """גאנט אינטראקטיבי: ציר זמן קבוע, זיהוי חפיפות, גרירה לעובד אחר."""
-    import urllib.parse as _uparse
+    """בונה HTML מלא לגאנט ומחזיר אותו — נפתח ב-blob URL בטאב חדש."""
+    import json as _j
 
-    ROLE_COLORS_G = {
-        "ראש צוות":   "#8e24aa",
-        "דיילת":      "#5b9bd5",
-        "דייל":       "#5b9bd5",
-        "מתאם תורים": "#f0a000",
-        "מפקח TSA":   "#d32f2f",
-        "שומר TSA":   "#2e7d32",
-        'טרייני ר"צ': "#f9a825",
-        "טרייני רצ":  "#f9a825",
+    ROLE_COLORS = {
+        "ראש צוות": "#8e24aa", "דיילת": "#1d6fa8", "דייל": "#1d6fa8",
+        "מתאם תורים": "#d97706", "מפקח TSA": "#dc2626",
+        "שומר TSA": "#16a34a", 'טרייני ר"צ': "#b45309", "טרייני רצ": "#b45309",
+    }
+    ROLE_ABBR = {
+        "ראש צוות": 'ר"צ', "דיילת": "דייל", "דייל": "דייל",
+        "מתאם תורים": "מתאם", "מפקח TSA": "מפקח",
+        "שומר TSA": "שומר", 'טרייני ר"צ': "טרייני", "טרייני רצ": "טרייני",
     }
 
-    timed_g = live_schedule[live_schedule["התחלה"].astype(str).str.strip() != ""].copy()
-    if timed_g.empty:
-        st.info("אין נתוני שיבוץ להצגה בגאנט.")
-        return
+    timed = live_schedule[live_schedule["התחלה"].astype(str).str.strip() != ""].copy()
 
-    all_s = pd.to_datetime(timed_g["התחלה"], format="%H:%M", errors="coerce")
-    all_e = pd.to_datetime(timed_g["סיום"],   format="%H:%M", errors="coerce")
-    # exact range from first to last task, with 0.5h buffer each side
-    _s_min = all_s.dropna()
-    _e_max = all_e.dropna()
-    g_min = max(int(_s_min.dt.hour.min()), 0)
-    _last_h = int(_e_max.dt.hour.max())
-    _last_m = int(_e_max.dt.minute.max())
-    g_max = min(_last_h + (2 if _last_m > 0 else 1), 25)
+    # ── time range ──
+    all_s = pd.to_datetime(timed["התחלה"], format="%H:%M", errors="coerce").dropna()
+    all_e = pd.to_datetime(timed["סיום"],   format="%H:%M", errors="coerce").dropna()
+    g_min = max(int(all_s.dt.hour.min()), 0) if not all_s.empty else 0
+    g_max = min(int(all_e.dt.hour.max()) + 2, 25) if not all_e.empty else 24
 
-    # עובדים: אך ורק מהסידור היומי הנוכחי
-    # (העובדים ששובצו לאותו יום — כולל שורות ❌ שמייצגות חוסרים)
-    _daily_workers = set()
-    for _col in ["עובד", "שם"]:
-        if _col in live_schedule.columns:
-            for _w in live_schedule[_col].dropna().unique():
-                _ws = str(_w).strip()
-                if _ws and _ws != "nan" and "❌" not in _ws:
-                    _daily_workers.add(_ws)
-    all_workers = sorted(list(_daily_workers))
-
-    workers_data = []
-    for worker in all_workers:
-        tasks = timed_g[timed_g["עובד"] == worker]
-        tlist = []
-        for row_idx, task in tasks.iterrows():
-            role  = normalize_role_label(str(task.get("תפקיד בסיס", "")))
-            flight_raw = str(task.get("טיסה", "")).strip()
-            # check for FIDS ETD override in schedule_df
-            try:
-                sched_row = schedule_df.loc[row_idx]
-                etd_start = str(sched_row.get("התחלה", task.get("התחלה", "")))
-                etd_end   = str(sched_row.get("סיום",   task.get("סיום",   "")))
-            except Exception:
-                etd_start = str(task.get("התחלה", ""))
-                etd_end   = str(task.get("סיום",   ""))
-            tlist.append({
-                "idx":    int(row_idx),
-                "flight": flight_raw.replace("LY", "").strip(),
-                "role":   role,
-                "start":  etd_start,
-                "end":    etd_end,
-                "color":  ROLE_COLORS_G.get(role, "#4a7fa5"),
-                "orig_start": str(task.get("התחלה", "")),
-                "orig_end":   str(task.get("סיום",   "")),
-            })
-        # shift hours from employees_snap
-        _shift_s, _shift_e = "", ""
-        _emp_snap = st.session_state.get("employees_snap")
-        if _emp_snap is not None and "שם" in _emp_snap.columns:
-            _er = _emp_snap[_emp_snap["שם"] == worker]
-            if not _er.empty:
-                _shift_s = str(_er.iloc[0].get("תחילת משמרת", "")).strip()
-                _shift_e = str(_er.iloc[0].get("סוף משמרת",   "")).strip()
-        if not _shift_s:
-            # fallback: first task start/end
-            if tlist:
-                _shift_s = tlist[0]["start"]
-                _shift_e = tlist[-1]["end"]
-        workers_data.append({"name": worker, "tasks": tlist, "shift_start": _shift_s, "shift_end": _shift_e})
-
-    # ── סדר: 21:00-23:59 קודם (יום קודם), אחר כך לפי שעת התחלה, שעת סיום, א-ב ──
-    def _sort_key(w):
-        def _hm(s):
-            try:
-                parts = str(s).strip().split(":")
-                return int(parts[0])*60 + int(parts[1])
-            except Exception:
-                return 9999
-        ss = _hm(w.get("shift_start",""))
-        se = _hm(w.get("shift_end",""))
-        name = w.get("name","")
-        if ss >= 21*60:
-            # משמרת ערב/לילה — מיום קודם, קודם כל לפי שעת התחלה
-            return (0, ss, se, name)
-        else:
-            # משמרות היום — לפי שעת התחלה, שעת סיום, א-ב
-            return (1, ss, se, name)
-    workers_data.sort(key=_sort_key)
-
-    gdata    = _json.dumps(workers_data,  ensure_ascii=False)
-    rcolors  = _json.dumps(ROLE_COLORS_G, ensure_ascii=False)
-    base_url = "?"   # relative — will be used with parent.location
-
-    n_workers = len(all_workers)
-    gantt_h   = max(520, n_workers * 50 + 100)
-
-    gantt_html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><style>
-*{{box-sizing:border-box;margin:0;padding:0;}}
-html,body{{height:100%;margin:0;overflow:hidden;}}
-body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;direction:ltr;display:flex;flex-direction:column;}}
-/* ── outer scroll container ── */
-#wrap{{
-  flex:1;overflow-y:auto;overflow-x:auto;min-height:0;
-  border:1px solid #1a2d42;
-}}
-/* ── unassigned flights tray ── */
-#tray{{
-  flex-shrink:0;background:#0a1628;border-top:2px solid #0d3050;
-  padding:10px 14px;max-height:140px;overflow-x:auto;overflow-y:hidden;
-}}
-#tray-title{{
-  font-size:11px;font-weight:800;color:rgba(0,201,190,.7);
-  margin-bottom:8px;letter-spacing:.5px;
-}}
-#tray-cards{{display:flex;gap:8px;align-items:center;flex-wrap:nowrap;min-width:max-content;}}
-.tray-card{{
-  padding:6px 14px;border-radius:8px;
-  font-size:11px;font-weight:800;color:#fff;
-  cursor:grab;border:1.5px solid rgba(255,255,255,.2);
-  background:#374151;white-space:nowrap;
-  box-shadow:0 2px 6px rgba(0,0,0,.4);
-  transition:opacity .15s,transform .1s;
-  display:flex;flex-direction:column;align-items:center;gap:2px;
-}}
-.tray-card:hover{{opacity:.85;transform:translateY(-2px);}}
-.tray-card:active{{cursor:grabbing;opacity:.6;}}
-.tray-card .tc-time{{font-size:9px;font-weight:600;color:rgba(255,255,255,.6);}}
-#inner{{position:relative;min-width:max-content;}}
-/* ─── Time axis header — sticky top ─── */
-.hdr-row{{
-  display:flex;position:sticky;top:0;z-index:30;
-  background:#04080f;border-bottom:2px solid #0d3050;
-  min-width:max-content;
-}}
-.hdr-lbl{{
-  width:150px;min-width:150px;flex-shrink:0;
-  background:#04080f;border-right:2px solid #0d3050;
-  position:sticky;left:0;z-index:31;
-}}
-.hdr-hours{{position:relative;flex:1;height:32px;}}
-.h-tick{{
-  position:absolute;top:0;height:100%;
-  border-left:1px solid #0d3050;
-  display:flex;align-items:center;padding-left:4px;
-  font-size:11px;color:rgba(0,201,190,.7);font-weight:700;
-  white-space:nowrap;
-}}
-
-/* ─── Worker rows ─── */
-.wrow{{
-  display:flex;align-items:stretch;min-height:50px;
-  border-bottom:1px solid #0d1f2d;transition:background .15s;
-  min-width:max-content;
-}}
-.wrow:nth-child(even){{background:rgba(0,40,70,.18);}}
-.wrow:hover{{background:rgba(0,201,190,.05);}}
-.wrow.drag-over{{background:rgba(0,201,190,.14)!important;outline:2px dashed rgba(0,201,190,.5);}}
-/* שם עובד — צד שמאל, קבוע בגלילה אופקית */
-.wlabel{{
-  width:150px;min-width:150px;flex-shrink:0;
-  display:flex;align-items:center;justify-content:flex-start;
-  padding:4px 10px;border-right:2px solid #0d3050;
-  position:sticky;left:0;background:#04080f;
-  font-size:12px;font-weight:800;color:#c8d8ec;z-index:5;
-  text-align:left;direction:ltr;
-}}
-.timeline{{position:relative;flex:1;height:50px;}}
-.v-line{{
-  position:absolute;top:0;bottom:0;
-  border-left:1px solid rgba(13,48,80,.6);pointer-events:none;
-}}
-/* ─── Task blocks ─── */
-.task{{
-  position:absolute;top:9px;height:32px;
-  border-radius:8px;display:flex;align-items:center;
-  justify-content:center;font-size:10.5px;font-weight:800;
-  color:rgba(255,255,255,.92);white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis;padding:0 7px;
-  box-shadow:0 2px 8px rgba(0,0,0,.35);
-  cursor:grab;transition:opacity .15s,box-shadow .15s;
-  border:1.5px solid transparent;
-}}
-.task:hover{{opacity:.88;box-shadow:0 4px 14px rgba(0,0,0,.5);}}
-.task:active{{cursor:grabbing;opacity:.75;}}
-.task.etd-changed{{border-color:#f59e0b!important;box-shadow:0 0 8px rgba(245,158,11,.4)!important;}}
-.task.overlap{{border-color:#ef4444!important;box-shadow:0 0 10px rgba(239,68,68,.5)!important;}}
-.task.departed{{
-  opacity:0.55;
-  background:repeating-linear-gradient(
-    45deg,rgba(255,255,255,.06),rgba(255,255,255,.06) 3px,transparent 3px,transparent 8px
-  ) !important;
-  border:1.5px solid rgba(255,255,255,.2) !important;
-  filter:saturate(0.4);
-}}
-/* ─── Tooltip ─── */
-/* ─── Shift popup ─── */
-#shift-pop{{
-  position:fixed;
-  background:#0d1f30;color:#c8d8ec;
-  border:1px solid rgba(0,201,190,.5);border-radius:10px;
-  padding:10px 14px;font-size:12px;direction:ltr;text-align:left;
-  z-index:9999;min-width:150px;pointer-events:none;
-  box-shadow:0 6px 20px rgba(0,0,0,.55);
-  line-height:1.8;
-}}
-#shift-pop.hidden{{display:none;}}
-#tip{{
-  position:fixed;background:#0d1f30;color:#cdd8e8;
-  border:1px solid #00c9be;border-radius:10px;padding:8px 12px;
-  font-size:12px;direction:rtl;text-align:right;
-  pointer-events:none;z-index:999;display:none;
-  line-height:1.6;min-width:180px;
-  box-shadow:0 6px 20px rgba(0,0,0,.5);
-}}
-</style></head>
-<body>
-<div id="tip"></div>
-<div id="shift-pop" class="hidden"></div>
-<div id="controls" style="
-  background:#04080f;padding:8px 14px;
-  display:flex;align-items:center;gap:12px;justify-content:center;
-  border-bottom:1px solid #0d3050;flex-shrink:0;direction:ltr;
-">
-  <button id="btn-back" onclick="shiftView(-3)" style="
-    background:#0d1f30;color:#00c9be;border:1px solid rgba(0,201,190,.4);
-    border-radius:10px;padding:6px 18px;font-size:14px;font-weight:900;cursor:pointer;
-  ">‹‹ 3-</button>
-  <span id="time-label" style="font-size:13px;color:#94a3b8;font-weight:700;min-width:110px;text-align:center;"></span>
-  <button id="btn-fwd" onclick="shiftView(3)" style="
-    background:#0d1f30;color:#00c9be;border:1px solid rgba(0,201,190,.4);
-    border-radius:10px;padding:6px 18px;font-size:14px;font-weight:900;cursor:pointer;
-  ">3+ ››</button>
-</div>
-<div id="wrap" style="flex:1;overflow-y:auto;overflow-x:auto;min-height:0;border:1px solid #1a2d42;"><div id="inner"></div></div>
-<div id="tray" style="display:none"><div id="tray-title" style="direction:ltr;text-align:left;">✈️ טיסות ללא שיבוץ — גרור לשורת עובד</div><div id="tray-cards"></div></div>
-<script>
-const ROLE_ABBR={{
-  "ראש צוות":   'ר"צ',
-  "דיילת":      "דייל",
-  "דייל":       "דייל",
-  "מתאם תורים": "מתאם",
-  "מפקח TSA":   "מפקח",
-  "שומר TSA":   "שומר",
-  'טרייני ר"צ': "טרייני",
-  "טרייני רצ":  "טרייני",
-}};
-const WORKERS={gdata};
-const RCOLORS={rcolors};
-const DATA_MIN={g_min},DATA_MAX={g_max};
-const LW=140;
-let HPX=55; // fixed — always 55px per hour, user scrolls horizontally
-
-// ── Window view: 8h window, shiftable by 3h ──
-const VIEW_HOURS = 8;                  // hours visible at once
-let viewStart = DATA_MIN;              // current window start
-
-function hfmt(h) {{ return String(h%24).padStart(2,"0")+":00"; }}
-
-function shiftView(delta) {{
-  const maxStart = Math.max(0, DATA_MAX - VIEW_HOURS);
-  viewStart = Math.max(DATA_MIN, Math.min(viewStart + delta, maxStart));
-  renderGantt();
-}}
-
-function updateLabel() {{
-  const lbl = document.getElementById("time-label");
-  if(lbl) lbl.textContent = hfmt(viewStart) + " – " + hfmt(viewStart + VIEW_HOURS);
-}}
-
-function h2px(s,dayMin){{
-  if(!s||s==="nan")return 0;
-  const p=s.split(":");
-  return Math.max(0,(parseInt(p[0]||0)+parseInt(p[1]||0)/60-dayMin)*HPX);
-}}
-function t2min(s){{
-  if(!s||s==="nan")return 0;
-  const p=s.split(":");
-  return parseInt(p[0]||0)*60+parseInt(p[1]||0);
-}}
-
-function renderGantt(){{
-  const DAY_MIN=viewStart;
-  const DAY_MAX=viewStart + VIEW_HOURS;
-  const HOURS=VIEW_HOURS;
-  updateLabel();
-  HPX=55; // zoomed out
-  const TOTAL_W=LW+HOURS*HPX+40;
-  const inner=document.getElementById("inner");
-  inner.innerHTML="";
-  inner.style.cssText=`position:relative;width:${{TOTAL_W+160}}px;min-width:${{TOTAL_W+160}}px;`;
-  // current time for departed detection
-  const _now=new Date();
-  const _nowMin=_now.getHours()*60+_now.getMinutes();
-
-// ─── Detect overlaps per worker ──
-WORKERS.forEach(w=>{{
-  const tasks=w.tasks;
-  for(let i=0;i<tasks.length;i++){{
-    const a=tasks[i];
-    const as=t2min(a.start),ae=t2min(a.end);
-    for(let j=i+1;j<tasks.length;j++){{
-      const b=tasks[j];
-      const bs=t2min(b.start),be=t2min(b.end);
-      if(as<be&&ae>bs){{ a.overlap=true; b.overlap=true; }}
-    }}
-    a.etd_changed=(a.start!==a.orig_start||a.end!==a.orig_end);
-  }}
-}});
-
-// ─── Header row with hour labels ──
-const hdrRow=document.createElement("div");
-hdrRow.className="hdr-row";
-const hdrLbl=document.createElement("div");
-hdrLbl.className="hdr-lbl";
-hdrRow.appendChild(hdrLbl);
-const hdrHrs=document.createElement("div");
-hdrHrs.className="hdr-hours";
-hdrHrs.style.width=`${{HOURS*HPX+160}}px`;
-for(let h=0;h<=HOURS;h++){{
-  const tick=document.createElement("div");
-  tick.className="h-tick";
-  tick.style.left=(h*HPX)+"px";
-  tick.textContent=String(DAY_MIN+h).padStart(2,"0")+":00";
-  hdrHrs.appendChild(tick);
-}}
-hdrRow.appendChild(hdrHrs);
-inner.appendChild(hdrRow);
-
-// ─── Legend ──
-
-
-// ─── Tooltip ──
-const tip=document.getElementById("tip");
-function showTip(e,html){{
-  tip.innerHTML=html;tip.style.display="block";
-  tip.style.left=(e.clientX+14)+"px";tip.style.top=(e.clientY-10)+"px";
-}}
-document.addEventListener("mousemove",e=>{{
-  if(tip.style.display!=="none"){{
-    tip.style.left=(e.clientX+14)+"px";tip.style.top=(e.clientY-10)+"px";
-  }}
-}});
-document.addEventListener("mouseleave",()=>tip.style.display="none");
-document.addEventListener("click", function(){{
-  document.getElementById("shift-pop").classList.add("hidden");
-}});
-
-// ─── Drag state ──
-let dragInfo=null;
-
-// ─── Worker rows ──
-WORKERS.forEach(w=>{{
-  const row=document.createElement("div");
-  row.className="wrow";
-  row.dataset.worker=w.name;
-
-  // Worker label
-  const lbl=document.createElement("div");
-  lbl.className="wlabel";lbl.textContent=w.name;
-  lbl.style.cursor="pointer";
-  lbl.addEventListener("click", function(e){{
-    e.stopPropagation();
-    const pop = document.getElementById("shift-pop");
-    const rect = lbl.getBoundingClientRect();
-    const ss = w.shift_start || "—";
-    const se = w.shift_end   || "—";
-    pop.innerHTML =
-      `<div style="font-weight:900;color:#00c9be;margin-bottom:6px;font-size:13px;">${{w.name}}</div>`
-    + `<div style="display:flex;justify-content:space-between;gap:20px;font-size:13px;font-weight:800;">`
-    + `<span style="color:#94a3b8;font-size:11px;">כניסה</span>`
-    + `<span style="color:#94a3b8;font-size:11px;">יציאה</span>`
-    + `</div>`
-    + `<div style="display:flex;justify-content:space-between;gap:20px;font-size:15px;font-weight:900;">`
-    + `<span style="color:#00c9be;">${{ss}}</span>`
-    + `<span style="color:#f59e0b;">${{se}}</span>`
-    + `</div>`;
-    // position below the label using fixed coords
-    const top = rect.bottom + 4;
-    const left = Math.max(4, rect.left);
-    pop.style.top  = top  + "px";
-    pop.style.left = left + "px";
-    pop.classList.remove("hidden");
-    // auto-close after 3 seconds
-    clearTimeout(pop._timer);
-    pop._timer = setTimeout(()=>pop.classList.add("hidden"), 3000);
-  }});
-  // also support touch
-  lbl.addEventListener("touchend", function(e){{
-    e.preventDefault();
-    lbl.click();
-  }});
-  row.appendChild(lbl);
-
-  // Timeline
-  const tl=document.createElement("div");
-  tl.className="timeline";
-  tl.style.width=(HOURS*HPX+160)+"px";
-
-  // Vertical grid lines
-  for(let h=0;h<=HOURS;h++){{
-    const vl=document.createElement("div");
-    vl.className="v-line";vl.style.left=(h*HPX)+"px";
-    tl.appendChild(vl);
-  }}
-
-  // Task blocks
-  w.tasks.forEach(t=>{{
-    const x1=h2px(t.start,DAY_MIN),x2=h2px(t.end,DAY_MIN);
-    const bw=Math.max(x2-x1,8);
-    const d=document.createElement("div");
-    const _tEndMin=t2min(t.end);
-    const _departed=_tEndMin>0&&_tEndMin<_nowMin&&!(t.start>t.end);
-    d.className="task"+(t.overlap?" overlap":"")+(t.etd_changed?" etd-changed":"")+(_departed?" departed":"");
-    d.style.cssText=`left:${{x1.toFixed(1)}}px;width:${{bw.toFixed(1)}}px;background:${{t.color}};`;
-    const abbr = ROLE_ABBR[t.role] || t.role.substring(0,4);
-    const label = t.flight ? t.flight + " · " + abbr : abbr;
-    d.textContent = (_departed ? "✈ " : "") + label;
-    d.dataset.idx=t.idx;
-    d.dataset.worker=w.name;
-    d.dataset.role=t.role;
-    d.setAttribute("draggable","true");
-
-    // Tooltip
-    d.addEventListener("mouseenter",e=>{{
-      const chg=t.etd_changed?`<br>⚠️ ETD שונה: ${{t.orig_start}}–${{t.orig_end}} → ${{t.start}}–${{t.end}}`:"";
-      const ov=t.overlap?`<br>🔴 חפיפה עם משימה אחרת`:"";
-      showTip(e,`<strong>${{t.flight||"—"}}</strong><br>${{t.role}}<br>🕐 ${{t.start}} – ${{t.end}}${{chg}}${{ov}}`);
-    }});
-    d.addEventListener("mouseleave",()=>tip.style.display="none");
-
-    // Drag
-    d.addEventListener("dragstart",e=>{{
-      dragInfo={{idx:t.idx,worker:w.name,role:t.role}};
-      e.dataTransfer.effectAllowed="move";
-      e.dataTransfer.setData("text/plain",t.idx);
-      d.style.opacity="0.5";
-    }});
-    d.addEventListener("dragend",()=>{{ d.style.opacity="1"; dragInfo=null; }});
-
-    // ── Touch drag (mobile) — only swap after real movement (>12px) ──
-    d.addEventListener("touchstart",e=>{{
-      const t0=e.touches[0];
-      d._touchStartX=t0.clientX; d._touchStartY=t0.clientY;
-      d._touchMoved=false;
-      d._touchActive=true;
-    }},{{passive:true}});
-    d.addEventListener("touchmove",e=>{{
-      if(!d._touchActive)return;
-      const t0=e.touches[0];
-      const dx=Math.abs(t0.clientX-d._touchStartX);
-      const dy=Math.abs(t0.clientY-d._touchStartY);
-      if(dx>12||dy>12){{
-        if(!d._touchMoved){{
-          d._touchMoved=true;
-          dragInfo={{idx:t.idx,worker:w.name,role:t.role}};
-          d.style.opacity="0.55";
-          document.querySelectorAll(".wrow").forEach(r=>r.classList.remove("drag-over"));
-        }}
-        const el=document.elementFromPoint(t0.clientX,t0.clientY);
-        if(el){{ const row2=el.closest(".wrow"); if(row2)row2.classList.add("drag-over"); }}
-      }}
-    }},{{passive:true}});
-    d.addEventListener("touchend",e=>{{
-      d.style.opacity="1";
-      document.querySelectorAll(".wrow").forEach(r=>r.classList.remove("drag-over"));
-      if(!d._touchMoved||!dragInfo){{ d._touchActive=false; dragInfo=null; return; }}
-      d._touchActive=false;
-      const touch=e.changedTouches[0];
-      const target=document.elementFromPoint(touch.clientX,touch.clientY);
-      if(target){{
-        const targetRow=target.closest(".wrow");
-        if(targetRow&&targetRow.dataset.worker!==w.name){{
-          const encoded=dragInfo.idx+":"+encodeURIComponent(targetRow.dataset.worker);
-          localStorage.setItem("gantt_swap_pending",encoded);
-          window.parent.location.href=window.parent.location.href.split("?")[0]+"?gantt_swap="+encoded;
-        }}
-      }}
-      dragInfo=null;
-    }});
-
-    tl.appendChild(d);
-  }});
-
-  // Drop zone on row
-  row.addEventListener("dragover",e=>{{
-    if(dragInfo&&dragInfo.worker!==w.name){{
-      e.preventDefault();
-      e.dataTransfer.dropEffect="move";
-      row.classList.add("drag-over");
-    }}
-  }});
-  row.addEventListener("dragleave",()=>row.classList.remove("drag-over"));
-  row.addEventListener("drop",e=>{{
-    e.preventDefault();
-    row.classList.remove("drag-over");
-    if(dragInfo&&dragInfo.worker!==w.name){{
-      const encoded=dragInfo.idx+":"+encodeURIComponent(w.name);
-      // שלח דרך localStorage — ללא קפיצה
-      window.parent.location.href=window.parent.location.href.split("?")[0]+"?gantt_swap="+encoded;
-    }}
-  }});
-
-  row.appendChild(tl);
-  inner.appendChild(row);
-}});
-}} // end renderGantt
-renderGantt(); // initial render
-
-// ── Listen for postMessage from opener ──
-window.addEventListener("message", function(e) {{
-  if(e.data && e.data.type === "gantt_swap_result") {{
-    const ok = e.data.ok;
-    const msg = e.data.msg || "";
-    const fb = document.createElement("div");
-    fb.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);"
-      + "background:#0d1f30;border:1px solid " + (ok?"#00c9be":"#ef4444") + ";border-radius:12px;"
-      + "padding:16px 24px;font-size:14px;font-weight:800;z-index:9999;direction:rtl;color:"+(ok?"#00c9be":"#ef4444")+";";
-    fb.textContent = msg;
-    document.body.appendChild(fb);
-    setTimeout(()=>{{fb.remove();if(ok)renderGantt();}}, 2500);
-  }}
-}});
-
-// ── Tray: unassigned flights ──────────────────────────────────
-if(MISSING && MISSING.length > 0){{
-  const tray = document.getElementById("tray");
-  const cards = document.getElementById("tray-cards");
-  tray.style.display = "block";
-  MISSING.forEach(m => {{
-    const card = document.createElement("div");
-    card.className = "tray-card";
-    card.setAttribute("draggable","true");
-    card.dataset.idx = m.idx;
-    card.dataset.role = m.role;
-    card.dataset.isMissing = "1";
-    card.style.background = m.color || "#1e3a5f";
-    card.innerHTML = `<span>${{m.flight || m.role}}</span><span class="tc-time">${{m.start}}–${{m.end}}</span>`;
-
-    card.addEventListener("dragstart", e => {{
-      dragInfo = {{idx: m.idx, worker: "__missing__", role: m.role, isMissing: true}};
-      e.dataTransfer.effectAllowed = "move";
-      card.style.opacity = "0.4";
-    }});
-    card.addEventListener("dragend", () => {{ card.style.opacity = "1"; dragInfo = null; }});
-    // touch drag for mobile
-    card.addEventListener("touchstart", e => {{
-      dragInfo = {{idx: m.idx, worker: "__missing__", role: m.role, isMissing: true}};
-      card.style.opacity = "0.5";
-      card._touchActive = true;
-    }}, {{passive: true}});
-    card.addEventListener("touchmove", e => {{
-      if(!card._touchActive) return;
-      const t = e.touches[0];
-      const el = document.elementFromPoint(t.clientX, t.clientY);
-      document.querySelectorAll(".wrow").forEach(r=>r.classList.remove("drag-over"));
-      if(el) {{ const row = el.closest(".wrow"); if(row) row.classList.add("drag-over"); }}
-    }}, {{passive: true}});
-    card.addEventListener("touchend", e => {{
-      card.style.opacity = "1";
-      document.querySelectorAll(".wrow").forEach(r=>r.classList.remove("drag-over"));
-      if(!card._touchActive || !dragInfo) return;
-      card._touchActive = false;
-      const t = e.changedTouches[0];
-      const target = document.elementFromPoint(t.clientX, t.clientY);
-      if(target) {{
-        const targetRow = target.closest(".wrow");
-        if(targetRow) {{
-          const encoded = dragInfo.idx + ":" + encodeURIComponent(targetRow.dataset.worker);
-          window.parent.location.href=window.parent.location.href.split("?")[0]+"?gantt_swap="+encoded;
-        }}
-      }}
-      dragInfo = null;
-    }});
-    cards.appendChild(card);
-  }});
-}}
-</script></body></html>"""
-
-    # ── inject missing flights into HTML ──
-    missing_flights_data = []
-    if missing_df is not None and not missing_df.empty:
-        for _, mrow in missing_df.iterrows():
-            role = normalize_role_label(str(mrow.get("תפקיד בסיס", "")))
-            missing_flights_data.append({
-                "idx":    int(mrow.name),
-                "flight": str(mrow.get("טיסה", "")).replace("LY","").strip(),
-                "role":   role,
-                "start":  str(mrow.get("התחלה", "")),
-                "end":    str(mrow.get("סיום",   "")),
-                "color":  "#374151",
-            })
-    missing_json = _json.dumps(missing_flights_data, ensure_ascii=False)
-    gantt_html_final = gantt_html.replace(
-        "const WORKERS=",
-        f"const MISSING={missing_json};\nconst WORKERS="
+    # ── workers: from daily schedule only, sorted ──
+    daily_workers = set(
+        str(w).strip() for w in live_schedule["עובד"].dropna().unique()
+        if "❌" not in str(w) and str(w).strip() not in ("", "nan")
     )
 
-    # ── הצג ישירות בתוך Streamlit ──
-    _components.html(gantt_html_final, height=820, scrolling=False)
+    emp_snap = st.session_state.get("employees_snap")
 
+    def shift_minutes(name):
+        if emp_snap is not None and "שם" in emp_snap.columns:
+            row = emp_snap[emp_snap["שם"] == name]
+            if not row.empty:
+                def hm(s):
+                    try: p=str(s).split(":"); return int(p[0])*60+int(p[1])
+                    except: return 9999
+                return hm(row.iloc[0].get("תחילת משמרת","")), hm(row.iloc[0].get("סוף משמרת",""))
+        return 9999, 9999
 
+    def sort_key(name):
+        ss, se = shift_minutes(name)
+        if ss >= 21*60: return (0, ss, se, name)
+        return (1, ss, se, name)
 
+    workers = sorted(list(daily_workers), key=sort_key)
 
+    # ── build workers_data ──
+    workers_data = []
+    for worker in workers:
+        tasks = timed[timed["עובד"] == worker]
+        tlist = []
+        for ridx, task in tasks.iterrows():
+            role = normalize_role_label(str(task.get("תפקיד בסיס", "")))
+            try:
+                sr = schedule_df.loc[ridx]
+                ts, te = str(sr.get("התחלה", task.get("התחלה",""))), str(sr.get("סיום", task.get("סיום","")))
+            except: ts, te = str(task.get("התחלה","")), str(task.get("סיום",""))
+            tlist.append({
+                "idx": int(ridx),
+                "flight": str(task.get("טיסה","")).replace("LY","").strip(),
+                "role": role, "start": ts, "end": te,
+                "color": ROLE_COLORS.get(role, "#334155"),
+                "abbr": ROLE_ABBR.get(role, role[:4]),
+            })
+        ss, se = shift_minutes(worker)
+        def mtostr(m):
+            if m==9999: return ""
+            return f"{m//60:02d}:{m%60:02d}"
+        workers_data.append({"name": worker, "tasks": tlist,
+                              "shift_start": mtostr(ss), "shift_end": mtostr(se)})
 
+    # missing flights
+    missing_data = []
+    if missing_df is not None and not missing_df.empty:
+        for _, mr in missing_df.iterrows():
+            role = normalize_role_label(str(mr.get("תפקיד בסיס","")))
+            missing_data.append({
+                "idx": int(mr.name),
+                "flight": str(mr.get("טיסה","")).replace("LY","").strip(),
+                "role": role, "start": str(mr.get("התחלה","")), "end": str(mr.get("סיום","")),
+                "color": "#374151", "abbr": ROLE_ABBR.get(role, role[:4]),
+            })
 
+    gdata = _j.dumps(workers_data, ensure_ascii=False)
+    mdata = _j.dumps(missing_data, ensure_ascii=False)
 
-# ── ייצוא טבלה — עמוד נפרד ──────────────────────────────────────────────────
-if st.session_state.pop("show_table_export", False) and "schedule_df" in st.session_state:
-    import json as _json_t
-    _od = output_df if "output_df" in dir() else None
-    if _od is not None:
-        _rows_html = ""
-        for _, _r in _od.iterrows():
-            _cells = "".join(
-                f'<td style="border:1px solid #1a3a5a;padding:6px 10px;white-space:nowrap;'
-                f'color:{"#ef4444" if "❌" in str(v) else "#c8d8ec"};">'
-                f'{str(v)}</td>'
-                for v in _r
-            )
-            _rows_html += f"<tr>{_cells}</tr>"
-        _hdrs = "".join(
-            f'<th style="background:#0d1f30;border:1px solid #1a3a5a;padding:8px 10px;'
-            f'font-size:11px;color:#00c9be;white-space:nowrap;">{c}</th>'
-            for c in _od.columns
-        )
-        _table_html = f"""<!DOCTYPE html>
+    html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5">
-<title>לוח שיבוץ</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>גאנט עובדים</title>
 <style>
-*{{box-sizing:border-box;margin:0;padding:0;}}
-body{{background:#04080f;color:#c8d8ec;font-family:"Segoe UI",Arial,sans-serif;direction:rtl;}}
-#top{{
-  position:sticky;top:0;background:#04080f;z-index:10;
-  padding:8px 12px;border-bottom:1px solid #0d3050;
-  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-}}
-#mode-btn{{
-  background:#0d1f30;color:#00c9be;border:1px solid rgba(0,201,190,.4);
-  border-radius:8px;padding:5px 14px;font-size:13px;font-weight:800;cursor:pointer;
-}}
-#search{{
-  background:#0d1f30;color:#c8d8ec;border:1px solid #1a3a5a;
-  border-radius:8px;padding:5px 12px;font-size:13px;flex:1;min-width:140px;
-}}
-#wrap{{overflow:auto;padding:8px;}}
-table{{border-collapse:collapse;font-size:12px;}}
-tr:hover td{{background:rgba(0,201,190,.06)!important;}}
-#landscape-warn{{
-  display:none;position:fixed;inset:0;background:#04080f;
-  z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:16px;
-  font-size:18px;color:#c8d8ec;text-align:center;
-}}
-/* on mobile portrait — show the rotate warning */
-@media screen and (max-width:768px) and (orientation:portrait) {{
-  #landscape-warn{{display:flex;}}
-}}
-</style>
-</head>
+*{{box-sizing:border-box;margin:0;padding:0}}
+html,body{{height:100%;background:#04080f;color:#c8d8ec;
+  font-family:"Segoe UI",Arial,sans-serif;overflow:hidden;display:flex;flex-direction:column}}
+/* ── top bar ── */
+#bar{{flex-shrink:0;display:flex;align-items:center;gap:8px;padding:5px 10px;
+  background:#060e1c;border-bottom:1px solid #0d3050;direction:ltr}}
+.nav-btn{{background:#0d1f30;color:#00c9be;border:1px solid rgba(0,201,190,.35);
+  border-radius:8px;padding:4px 14px;font-size:13px;font-weight:800;cursor:pointer}}
+.nav-btn:active{{opacity:.7}}
+#time-lbl{{font-size:12px;color:#64748b;min-width:110px;text-align:center}}
+/* ── scroll container ── */
+#outer{{flex:1;overflow:auto;min-height:0}}
+/* ── sticky header row ── */
+.hdr{{display:flex;position:sticky;top:0;z-index:20;
+  background:#060e1c;border-bottom:2px solid #0d3050}}
+.hdr-lbl{{width:110px;min-width:110px;flex-shrink:0;
+  position:sticky;left:0;background:#060e1c;z-index:21;
+  border-right:1px solid #0d3050}}
+.hdr-time{{position:relative;height:20px}}
+.tick{{position:absolute;top:0;bottom:0;border-left:1px solid #0d3050;
+  font-size:9px;color:rgba(0,201,190,.65);font-weight:700;
+  padding-left:2px;display:flex;align-items:center;white-space:nowrap}}
+/* ── rows ── */
+.wrow{{display:flex;align-items:stretch;min-height:20px;border-bottom:1px solid #0a1628}}
+.wrow:nth-child(even){{background:rgba(0,30,60,.2)}}
+.wrow.drag-over{{background:rgba(0,201,190,.12)!important;outline:2px dashed rgba(0,201,190,.5)}}
+.wlabel{{width:110px;min-width:110px;flex-shrink:0;font-size:9px;font-weight:700;
+  color:#94a3b8;display:flex;align-items:center;padding:0 6px;
+  position:sticky;left:0;background:#04080f;border-right:1px solid #0d3050;
+  cursor:pointer;z-index:5}}
+.wrow:nth-child(even) .wlabel{{background:#04080f}}
+.tl{{position:relative;flex:1}}
+.vline{{position:absolute;top:0;bottom:0;border-left:1px solid rgba(13,48,80,.5);pointer-events:none}}
+/* ── tasks ── */
+.task{{position:absolute;top:2px;height:16px;border-radius:4px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:8px;font-weight:800;color:rgba(255,255,255,.9);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  padding:0 4px;cursor:grab;border:1px solid transparent}}
+.task.departed{{opacity:.45;filter:saturate(.3)}}
+.task.overlap{{border-color:#ef4444!important}}
+/* ── tray ── */
+#tray{{flex-shrink:0;background:#060e1c;border-top:2px solid #0d3050;
+  padding:6px 10px;max-height:60px;overflow-x:auto;display:none;direction:ltr}}
+#tray-inner{{display:flex;gap:6px;align-items:center}}
+.tc{{background:#1e3a5f;color:#c8d8ec;border-radius:6px;padding:3px 10px;
+  font-size:9px;font-weight:800;cursor:grab;white-space:nowrap;border:1px solid #334}}
+/* ── popup ── */
+#pop{{position:fixed;background:#0d1f30;color:#c8d8ec;
+  border:1px solid rgba(0,201,190,.5);border-radius:8px;
+  padding:8px 12px;font-size:11px;z-index:999;display:none;direction:ltr;
+  box-shadow:0 4px 16px rgba(0,0,0,.5);min-width:130px}}
+</style></head>
 <body>
-<div id="landscape-warn">
-  <div style="font-size:48px;">🔄</div>
-  <div>סובב את המכשיר למצב Landscape לצפייה בטבלה</div>
+<div id="bar">
+  <button class="nav-btn" onclick="shift(-12)">◀ 12-</button>
+  <span id="time-lbl"></span>
+  <button class="nav-btn" onclick="shift(12)">12+ ▶</button>
 </div>
-<div id="top">
-  <span style="font-size:14px;font-weight:900;color:#00c9be;">✈️ לוח שיבוץ</span>
-  <input id="search" placeholder="חפש..." oninput="filterTable(this.value)">
-  <button id="mode-btn" onclick="toggleMode()">🔄 Landscape / Portrait</button>
-</div>
-<div id="wrap">
-  <table id="tbl">
-    <thead><tr>{_hdrs}</tr></thead>
-    <tbody id="tbody">{_rows_html}</tbody>
-  </table>
-</div>
+<div id="pop"></div>
+<div id="outer"><div id="inner"></div></div>
+<div id="tray"><div id="tray-inner"></div></div>
 <script>
-function filterTable(q){{
-  const rows=document.querySelectorAll("#tbody tr");
-  rows.forEach(r=>{{
-    r.style.display=r.textContent.toLowerCase().includes(q.toLowerCase())?"":"none";
+const W={gdata}, MISS={mdata};
+const G_MIN={g_min}, G_MAX={g_max};
+const LW=110, HPX=42;
+let viewStart=G_MIN;
+const VIEW=Math.min(12,G_MAX-G_MIN);
+
+function pad(h){{return String(h%24).padStart(2,"0")+":00"}}
+function hm2min(s){{
+  if(!s||s==="nan")return-1;
+  const p=s.split(":");return parseInt(p[0]||0)*60+parseInt(p[1]||0);
+}}
+function h2x(s){{
+  if(!s||s==="nan")return-1;
+  const p=s.split(":");
+  return(parseInt(p[0]||0)+parseInt(p[1]||0)/60-viewStart)*HPX;
+}}
+function shift(d){{
+  viewStart=Math.max(G_MIN,Math.min(viewStart+d,G_MAX-VIEW));
+  render();
+}}
+function updateBar(){{
+  document.getElementById("time-lbl").textContent=
+    pad(viewStart)+" – "+pad(viewStart+VIEW);
+}}
+const now=new Date();
+const nowMin=now.getHours()*60+now.getMinutes();
+let dragInfo=null;
+
+function render(){{
+  updateBar();
+  const TOTAL=LW+VIEW*HPX+80;
+  const el=document.getElementById("inner");
+  el.innerHTML="";
+  el.style.cssText=`position:relative;width:${{TOTAL}}px;min-width:${{TOTAL}}px`;
+
+  // header
+  const hdr=document.createElement("div");hdr.className="hdr";
+  const hl=document.createElement("div");hl.className="hdr-lbl";hdr.appendChild(hl);
+  const ht=document.createElement("div");ht.className="hdr-time";
+  ht.style.width=(VIEW*HPX+80)+"px";
+  for(let h=0;h<=VIEW;h++){{
+    const t=document.createElement("div");t.className="tick";
+    t.style.left=(h*HPX)+"px";t.textContent=pad(viewStart+h);
+    ht.appendChild(t);
+  }}
+  hdr.appendChild(ht);el.appendChild(hdr);
+
+  // rows
+  W.forEach(w=>{{
+    const row=document.createElement("div");row.className="wrow";row.dataset.worker=w.name;
+    // label
+    const lbl=document.createElement("div");lbl.className="wlabel";lbl.textContent=w.name;
+    lbl.addEventListener("click",e=>{{
+      e.stopPropagation();
+      const pop=document.getElementById("pop");
+      pop.innerHTML=`<strong style="color:#00c9be">${{w.name}}</strong><br>`
+        +`<span style="color:#94a3b8">משמרת: </span>`
+        +`<strong>${{w.shift_start||"?"}} – ${{w.shift_end||"?"}}</strong>`;
+      pop.style.display="block";
+      pop.style.left=Math.min(e.clientX+8,window.innerWidth-160)+"px";
+      pop.style.top=(e.clientY+8)+"px";
+      clearTimeout(pop._t);pop._t=setTimeout(()=>pop.style.display="none",3000);
+    }});
+    lbl.addEventListener("touchend",e=>{{e.preventDefault();lbl.click()}});
+    row.appendChild(lbl);
+
+    // timeline
+    const tl=document.createElement("div");tl.className="tl";
+    tl.style.width=(VIEW*HPX+80)+"px";
+    for(let h=0;h<=VIEW;h++){{
+      const v=document.createElement("div");v.className="vline";v.style.left=(h*HPX)+"px";tl.appendChild(v);
+    }}
+    w.tasks.forEach(t=>{{
+      const x1=h2x(t.start),x2=h2x(t.end);
+      if(x2<=0||x1>VIEW*HPX+80)return; // outside view
+      const bw=Math.max(x2-Math.max(x1,0),6);
+      const bx=Math.max(x1,0);
+      const d=document.createElement("div");d.className="task";
+      const end=hm2min(t.end);
+      if(end>0&&end<nowMin)d.classList.add("departed");
+      d.style.cssText=`left:${{bx.toFixed(1)}}px;width:${{bw.toFixed(1)}}px;background:${{t.color}}`;
+      d.textContent=(end>0&&end<nowMin?"✈ ":"")+t.flight+(t.flight?" · ":"")+t.abbr;
+      d.title=`${{w.name}} | ${{t.role}} | ${{t.start}}–${{t.end}}`;
+      d.setAttribute("draggable","true");
+      // desktop drag
+      d.addEventListener("dragstart",e=>{{
+        dragInfo={{idx:t.idx,worker:w.name}};
+        e.dataTransfer.setData("text/plain",t.idx);d.style.opacity=".4";
+      }});
+      d.addEventListener("dragend",()=>{{d.style.opacity="1";dragInfo=null}});
+      // touch drag
+      let tx0,ty0,moved=false;
+      d.addEventListener("touchstart",e=>{{
+        tx0=e.touches[0].clientX;ty0=e.touches[0].clientY;moved=false;
+      }},{{passive:true}});
+      d.addEventListener("touchmove",e=>{{
+        const dx=Math.abs(e.touches[0].clientX-tx0),dy=Math.abs(e.touches[0].clientY-ty0);
+        if(dx>10||dy>10){{moved=true;dragInfo={{idx:t.idx,worker:w.name}};d.style.opacity=".4";}}
+        if(moved){{
+          document.querySelectorAll(".wrow").forEach(r=>r.classList.remove("drag-over"));
+          const el2=document.elementFromPoint(e.touches[0].clientX,e.touches[0].clientY);
+          if(el2){{const r2=el2.closest(".wrow");if(r2)r2.classList.add("drag-over");}}
+        }}
+      }},{{passive:true}});
+      d.addEventListener("touchend",e=>{{
+        d.style.opacity="1";document.querySelectorAll(".wrow").forEach(r=>r.classList.remove("drag-over"));
+        if(!moved||!dragInfo){{dragInfo=null;return;}}
+        const touch=e.changedTouches[0];
+        const target=document.elementFromPoint(touch.clientX,touch.clientY);
+        if(target){{const r2=target.closest(".wrow");
+          if(r2&&r2.dataset.worker!==w.name)doSwap(dragInfo.idx,r2.dataset.worker);
+        }}
+        dragInfo=null;
+      }});
+      tl.appendChild(d);
+    }});
+    // drop
+    row.addEventListener("dragover",e=>{{if(dragInfo&&dragInfo.worker!==w.name){{e.preventDefault();row.classList.add("drag-over");}}}});
+    row.addEventListener("dragleave",()=>row.classList.remove("drag-over"));
+    row.addEventListener("drop",e=>{{
+      e.preventDefault();row.classList.remove("drag-over");
+      if(dragInfo&&dragInfo.worker!==w.name)doSwap(dragInfo.idx,w.name);
+      dragInfo=null;
+    }});
+    row.appendChild(tl);el.appendChild(row);
   }});
 }}
-function toggleMode(){{
-  if(document.documentElement.style.transform==="rotate(90deg) translateY(-100%)"){{
-    document.documentElement.style.cssText="";
+
+function doSwap(idx,newWorker){{
+  const encoded=idx+":"+encodeURIComponent(newWorker);
+  const base=window.location.href.split("?")[0];
+  if(window.opener&&!window.opener.closed){{
+    window.opener.location.href=base.replace(window.location.href.split("?")[0],
+      window.opener.location.href.split("?")[0])+"?gantt_swap="+encoded;
   }} else {{
-    document.documentElement.style.cssText=
-      "transform:rotate(90deg) translateY(-100%);transform-origin:top left;"
-      +"width:100vh;height:100vw;overflow:hidden;";
+    window.location.href=base+"?gantt_swap="+encoded;
   }}
 }}
-</script>
-</body></html>"""
-        import base64 as _b64t
-        _enc = _b64t.b64encode(_table_html.encode("utf-8")).decode("ascii")
-        _components.html(f"""<script>
-var b=atob("{_enc}");
-var bytes=new Uint8Array(b.length);
-for(var i=0;i<b.length;i++) bytes[i]=b.charCodeAt(i);
-var blob=new Blob([bytes],{{type:"text/html;charset=utf-8"}});
-window.open(URL.createObjectURL(blob),"_blank");
-</script>""", height=0)
+
+// tray
+if(MISS.length){{
+  document.getElementById("tray").style.display="block";
+  MISS.forEach(m=>{{
+    const c=document.createElement("div");c.className="tc";
+    c.textContent=m.flight+(m.flight?" · ":"")+m.abbr+" "+m.start;
+    c.setAttribute("draggable","true");
+    c.addEventListener("dragstart",e=>{{dragInfo={{idx:m.idx,worker:"__missing__"}};c.style.opacity=".4";}});
+    c.addEventListener("dragend",()=>{{c.style.opacity="1";dragInfo=null;}});
+    let tx0,ty0,moved=false;
+    c.addEventListener("touchstart",e=>{{tx0=e.touches[0].clientX;ty0=e.touches[0].clientY;moved=false;}},{{passive:true}});
+    c.addEventListener("touchmove",e=>{{
+      if(Math.abs(e.touches[0].clientX-tx0)>10||Math.abs(e.touches[0].clientY-ty0)>10){{
+        moved=true;dragInfo={{idx:m.idx,worker:"__missing__"}};c.style.opacity=".4";
+      }}
+    }},{{passive:true}});
+    c.addEventListener("touchend",e=>{{
+      c.style.opacity="1";document.querySelectorAll(".wrow").forEach(r=>r.classList.remove("drag-over"));
+      if(!moved||!dragInfo){{dragInfo=null;return;}}
+      const t=e.changedTouches[0];const el2=document.elementFromPoint(t.clientX,t.clientY);
+      if(el2){{const r2=el2.closest(".wrow");if(r2)doSwap(m.idx,r2.dataset.worker);}}
+      dragInfo=null;
+    }});
+    document.getElementById("tray-inner").appendChild(c);
+  }});
+}}
+document.addEventListener("click",()=>document.getElementById("pop").style.display="none");
+render();
+</script></body></html>"""
+
+    return html
 
 
 # ── גאנט: רנדור אחרי הגדרת הפונקציה ──────────────────────────────────────
@@ -2064,7 +1676,16 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
 
     _sched = st.session_state["schedule_df"]
     _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
-    _render_interactive_gantt(_sched, _sched, missing_df=_miss)
+    import base64 as _b64g
+    _html = _render_interactive_gantt(_sched, _sched, missing_df=_miss)
+    _enc  = _b64g.b64encode(_html.encode("utf-8")).decode("ascii")
+    _components.html(f"""<script>
+var b=atob("{_enc}");
+var by=new Uint8Array(b.length);
+for(var i=0;i<b.length;i++)by[i]=b.charCodeAt(i);
+var url=URL.createObjectURL(new Blob([by],{{type:"text/html;charset=utf-8"}}));
+window.open(url,"_gantt");
+</script>""", height=0)
     st.stop()
 
 
@@ -2112,7 +1733,6 @@ with col_btn_auto:
             st.session_state["schedule_df"]    = schedule_df.copy()
             st.session_state["flights_snap"]   = flights_editor_df.copy()
             st.session_state["employees_snap"] = employees_df.copy()
-            st.session_state["show_gantt_page"] = True
             st.rerun()
         except Exception as exc:
             st.error("הייתה שגיאה בבניית השיבוץ.")
@@ -2200,7 +1820,17 @@ if "schedule_df" in st.session_state:
                     'color:#00c9be;padding:4px 0;">📅 גאנט עובדים</div>',
                     unsafe_allow_html=True,
                 )
-            _render_interactive_gantt(live_schedule, st.session_state["schedule_df"], missing_df=missing)
+            _sched = st.session_state["schedule_df"]
+            _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
+            if st.button("📅 פתח גאנט", use_container_width=True, key="open_gantt_tab_btn"):
+                import base64 as _b64g2
+                _html2 = _render_interactive_gantt(live_schedule, _sched, missing_df=missing)
+                _enc2  = _b64g2.b64encode(_html2.encode("utf-8")).decode("ascii")
+                _components.html(f"""<script>
+var b=atob("{_enc2}");var by=new Uint8Array(b.length);
+for(var i=0;i<b.length;i++)by[i]=b.charCodeAt(i);
+window.open(URL.createObjectURL(new Blob([by],{{type:"text/html;charset=utf-8"}})),"_gantt");
+</script>""", height=0)
             st.stop()
 
         (tab_schedule, tab_gantt, tab_missing, tab_available,
@@ -2240,7 +1870,17 @@ if "schedule_df" in st.session_state:
 
         # ── Tab: גאנט ────────────────────────────────────────────────────────
         with tab_gantt:
-            _render_interactive_gantt(live_schedule, st.session_state["schedule_df"], missing_df=missing)
+            _sched = st.session_state["schedule_df"]
+            _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
+            if st.button("📅 פתח גאנט", use_container_width=True, key="open_gantt_tab_btn"):
+                import base64 as _b64g2
+                _html2 = _render_interactive_gantt(live_schedule, _sched, missing_df=missing)
+                _enc2  = _b64g2.b64encode(_html2.encode("utf-8")).decode("ascii")
+                _components.html(f"""<script>
+var b=atob("{_enc2}");var by=new Uint8Array(b.length);
+for(var i=0;i<b.length;i++)by[i]=b.charCodeAt(i);
+window.open(URL.createObjectURL(new Blob([by],{{type:"text/html;charset=utf-8"}})),"_gantt");
+</script>""", height=0)
 
         # ── Tab: פנויים באולם ─────────────────────────────────────────────────
         with tab_available:
