@@ -1408,26 +1408,46 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
 
     timed = live_schedule[live_schedule["התחלה"].astype(str).str.strip() != ""].copy()
 
+    # ── guard: if no timed data, show diagnostic ──
+    if timed.empty:
+        _cols = list(live_schedule.columns[:10])
+        _rows = len(live_schedule)
+        return f"""<!DOCTYPE html><html><body style="background:#04080f;color:#c8d8ec;
+          font-family:monospace;padding:20px;direction:ltr;">
+          <h2 style="color:#ef4444">אין נתוני זמן בגאנט</h2>
+          <p>שורות בסידור: {_rows}</p>
+          <p>עמודות: {_cols}</p>
+          <p>בדוק שעמודת "התחלה" קיימת ומכילה שעות</p>
+          </body></html>"""
+
     # ── time range ──
-    all_s = pd.to_datetime(timed["התחלה"], format="%H:%M", errors="coerce").dropna()
-    all_e = pd.to_datetime(timed["סיום"],   format="%H:%M", errors="coerce").dropna()
-    g_min = 0  # always start from 00:00
-    # g_max: ceiling of latest actual end time + 1h buffer
-    if not all_e.empty:
-        # overnight flights: end time < start time → end is next day (add 24h)
-        _s_mins = all_s.dt.hour * 60 + all_s.dt.minute
-        _e_mins = all_e.dt.hour * 60 + all_e.dt.minute
-        # for each task, if end < start and start is evening, treat end as +24h
-        _e_adjusted = _e_mins.copy()
-        _overnight = (_e_mins < _s_mins) & (_s_mins > 12 * 60)
-        _e_adjusted[_overnight] = _e_mins[_overnight] + 24 * 60
-        _last_total = int(_e_adjusted.max())
-        _last_h = _last_total // 60
-        _last_m = _last_total % 60
-        g_max = _last_h + (1 if _last_m == 0 else 2)
-        g_max = min(g_max, 30)
-    else:
-        g_max = 24
+    def _hm_to_min(s):
+        try:
+            p = str(s).strip().split(":")
+            return int(p[0]) * 60 + int(p[1])
+        except Exception:
+            return -1
+
+    g_min = 0
+    g_max = 26  # default
+
+    if not timed.empty:
+        _max_end = 0
+        for _, _row in timed.iterrows():
+            _sm = _hm_to_min(str(_row.get("התחלה", "")))
+            _em = _hm_to_min(str(_row.get("סיום", "")))
+            if _sm < 0 or _em < 0:
+                continue
+            # overnight: end < start and start is evening
+            if _em < _sm and _sm > 12 * 60:
+                _em += 24 * 60
+            if _em > _max_end:
+                _max_end = _em
+        if _max_end > 0:
+            _last_h = _max_end // 60
+            _last_m = _max_end % 60
+            g_max = _last_h + (1 if _last_m == 0 else 2)
+            g_max = min(g_max, 30)
 
     # ── workers: from daily schedule only, sorted ──
     daily_workers = set(
