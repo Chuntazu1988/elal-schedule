@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>iSchedule — Ready for take off in seconds</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=Orbitron:wght@700;900&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --teal:#00c8d4; --teal-glow:#00e5f0; --blue:#003594;
+      --gold:#C9A84C; --silver:#b8c8d8; --dark:#07090f; --darker:#04050a;
+      --font:'Plus Jakarta Sans',system-ui,sans-serif;
+      --font-brand:'Orbitron','Plus Jakarta Sans',sans-serif;
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html{scroll-behavior:smooth}
+    body{font-family:var(--font);background:var(--dark);color:#fff;overflow-x:hidden}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+    /* ══ SPLASH ══════════════════════════════════════════════════ */
+    #splash{
+      position:fixed;inset:0;z-index:9999;background:#04050a;
+      display:flex;flex-direction:column;align-items:center;justify-content:center;
+      overflow:hidden;
+    }
+    #splash.exit{animation:splashExit 1s cubic-bezier(.4,0,.2,1) forwards}
+    @keyframes splashExit{to{opacity:0;transform:scale(1.04);pointer-events:none}}
+
+    #star-canvas,#plane-canvas{position:absolute;inset:0;pointer-events:none}
+    #plane-canvas{z-index:2}
+
+    .splash-ambient{
+      position:absolute;z-index:1;width:480px;height:480px;border-radius:50%;
+      background:radial-gradient(circle,rgba(0,200,212,.1) 0%,transparent 65%);
+      animation:ambientPulse 3s ease-in-out infinite;opacity:0;
+    }
+    @keyframes ambientPulse{0%,100%{transform:scale(1);opacity:.6}50%{transform:scale(1.1);opacity:1}}
+
+    .scan-line{
+      position:absolute;left:0;right:0;height:1px;z-index:1;
+      background:linear-gradient(90deg,transparent,rgba(0,200,212,.3) 50%,transparent);
+      animation:scan 4s linear infinite;opacity:.5;
+    }
+    @keyframes scan{from{top:-2px}to{top:100%}}
+
+    /* ── Globe ── */
+    #globe-wrap{
+      position:relative;z-index:3;width:300px;height:300px;
+      opacity:0;transform:scale(.15);
+      transition:opacity .9s ease-out,transform .9s cubic-bezier(.34,1.56,.64,1);
+    }
+    #globe-wrap.appear{opacity:1;transform:scale(1)}
+    .grid-line{stroke-dasharray:1000;stroke-dashoffset:1000;transition:stroke-dashoffset 1.3s ease-out}
+    #globe-wrap.appear .grid-line{stroke-dashoffset:0}
+    #globe-glow{animation:globeGlowPulse 2.5s ease-in-out infinite}
+    @keyframes globeGlowPulse{0%,100%{opacity:.45}50%{opacity:.9}}
+
+    /* ── Brand text ── */
+    #brand-wrap{margin-top:28px;text-align:center;position:relative;z-index:4}
+    #app-name{display:flex;align-items:baseline;justify-content:center;gap:2px;direction:ltr}
+
+    #letter-i{
+      font-family:var(--font-brand);font-size:clamp(56px,10vw,88px);font-weight:900;
+      color:#00c8d4;opacity:0;transform:translateY(-40px) scale(.6);
+      transition:opacity .5s ease-out,transform .5s cubic-bezier(.34,1.56,.64,1);
+      position:relative;line-height:1;
+    }
+    #letter-i.appear{opacity:1;transform:translateY(0) scale(1)}
+    #sparkle{position:absolute;top:-14px;left:50%;transform:translateX(-50%);opacity:0}
+    #sparkle.appear{animation:sparkleAnim .7s ease-out .1s forwards}
+    @keyframes sparkleAnim{
+      0%{opacity:0;transform:translateX(-50%) scale(0) rotate(0)}
+      50%{opacity:1;transform:translateX(-50%) scale(1.3) rotate(20deg)}
+      100%{opacity:1;transform:translateX(-50%) scale(1) rotate(0)}
+    }
+    #letter-schedule{
+      font-family:var(--font-brand);font-size:clamp(40px,7vw,64px);font-weight:700;
+      color:var(--silver);opacity:0;transform:translateX(30px);
+      transition:opacity .6s ease-out .1s,transform .6s cubic-bezier(.34,1.2,.64,1) .1s;
+    }
+    #letter-schedule.appear{opacity:1;transform:translateX(0)}
+    #tagline{
+      margin-top:14px;font-size:clamp(14px,2.5vw,18px);font-weight:500;
+      color:rgba(255,255,255,.55);letter-spacing:.03em;
+      opacity:0;transform:translateY(12px);
+      transition:opacity .6s ease-out,transform .6s ease-out;
+    }
+    #tagline.appear{opacity:1;transform:translateY(0)}
+    #tagline .hl{color:#00c8d4;font-weight:600}
+
+    /* ── Button ── */
+    #takeoff-btn{
+      margin-top:36px;display:inline-flex;align-items:center;gap:12px;
+      background:linear-gradient(135deg,#00c8d4,#008fa0);
+      color:#04050a;font-family:var(--font);font-size:17px;font-weight:800;
+      padding:16px 40px;border-radius:100px;border:none;cursor:pointer;
+      opacity:0;transform:translateY(20px) scale(.9);
+      transition:opacity .5s ease-out,transform .5s cubic-bezier(.34,1.56,.64,1),box-shadow .3s,background .3s;
+      position:relative;overflow:hidden;
+    }
+    #takeoff-btn::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(255,255,255,.18),transparent);border-radius:100px}
+    #takeoff-btn.appear{
+      opacity:1;transform:translateY(0) scale(1);
+      animation:btnPulse 2.5s ease-in-out .5s infinite;
+    }
+    @keyframes btnPulse{
+      0%,100%{box-shadow:0 0 0 0 rgba(0,200,212,.4),0 8px 32px rgba(0,200,212,.25)}
+      50%{box-shadow:0 0 0 12px rgba(0,200,212,0),0 8px 40px rgba(0,200,212,.45)}
+    }
+    #takeoff-btn:hover{
+      background:linear-gradient(135deg,#00e5f0,#00aabf);
+      box-shadow:0 12px 48px rgba(0,200,212,.55)!important;
+      transform:translateY(-2px) scale(1.03)!important;animation:none!important;
+    }
+
+    /* ══ LANDING PAGE ════════════════════════════════════════════ */
+    #main-content{display:none;opacity:0;transition:opacity .8s ease-out}
+    #main-content.visible{opacity:1}
+
+    .container{max-width:1200px;margin:0 auto;padding:0 24px}
+    .section{padding:100px 0}
+    .tag{
+      display:inline-flex;align-items:center;gap:8px;
+      background:rgba(0,200,212,.08);border:1px solid rgba(0,200,212,.22);
+      color:#00c8d4;font-size:12px;font-weight:700;
+      padding:6px 14px;border-radius:100px;letter-spacing:.06em;
+      text-transform:uppercase;margin-bottom:20px;
+    }
+    nav{position:fixed;top:0;right:0;left:0;z-index:100;padding:0 24px;transition:all .3s}
+    nav.scrolled{background:rgba(7,9,15,.92);backdrop-filter:blur(16px);border-bottom:1px solid rgba(0,200,212,.08)}
+    .nav-inner{max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:70px}
+    .nav-logo{display:flex;align-items:center;gap:10px;font-family:var(--font-brand);font-weight:700;font-size:20px;direction:ltr}
+    .nav-logo .i-letter{color:#00c8d4}
+    .nav-logo .globe-icon{width:32px;height:32px}
+    .nav-links{display:flex;align-items:center;gap:32px;font-size:14px;font-weight:600}
+    .nav-links a{color:rgba(255,255,255,.65);transition:color .2s}
+    .nav-links a:hover{color:#fff}
+    .nav-cta{background:#00c8d4;color:#07090f!important;padding:9px 22px;border-radius:100px;font-weight:800!important}
+    .nav-cta:hover{background:#00e5f0}
+    #hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;position:relative;overflow:hidden;padding:120px 24px 80px}
+    .hero-bg{position:absolute;inset:0;background:linear-gradient(180deg,#07090f 0%,#040920 55%,#07090f 100%)}
+    .hero-glow{position:absolute;bottom:-100px;left:50%;transform:translateX(-50%);width:900px;height:400px;background:radial-gradient(ellipse,rgba(0,200,212,.07) 0%,transparent 65%)}
+    .runway{position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:120px;height:50%;border-left:2px dashed rgba(0,200,212,.14);border-right:2px dashed rgba(0,200,212,.14)}
+    .runway-lights{position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:120px;height:50%}
+    .rl{position:absolute;left:50%;transform:translateX(-50%);width:6px;border-radius:3px;background:rgba(0,200,212,.7);animation:rlPulse 2s ease-in-out infinite}
+    .rl:nth-child(1){bottom:8%;height:28px;animation-delay:0s}.rl:nth-child(2){bottom:20%;height:28px;animation-delay:.25s}.rl:nth-child(3){bottom:32%;height:28px;animation-delay:.5s}.rl:nth-child(4){bottom:44%;height:28px;animation-delay:.75s}
+    @keyframes rlPulse{0%,100%{opacity:.2}50%{opacity:.9}}
+    .hero-stars{position:absolute;inset:0;overflow:hidden}
+    .hstar{position:absolute;border-radius:50%;background:#fff;animation:twinkle 3s ease-in-out infinite}
+    @keyframes twinkle{0%,100%{opacity:.15;transform:scale(1)}50%{opacity:.8;transform:scale(1.4)}}
+    .radar-ring{position:absolute;border-radius:50%;border:1px solid rgba(0,200,212,.09);animation:radarExpand 5s linear infinite}
+    .radar-ring:nth-child(1){width:300px;height:300px;bottom:-80px;right:8%;animation-delay:0s}
+    .radar-ring:nth-child(2){width:550px;height:550px;bottom:-200px;right:-3%;animation-delay:1.6s}
+    .radar-ring:nth-child(3){width:800px;height:800px;bottom:-320px;right:-12%;animation-delay:3.2s}
+    @keyframes radarExpand{0%{opacity:.6;transform:scale(.85)}100%{opacity:0;transform:scale(1.05)}}
+    .hero-content{position:relative;z-index:2;max-width:1200px;margin:0 auto;width:100%;display:grid;grid-template-columns:1fr 1fr;gap:60px;align-items:center}
+    .hero-h1{font-size:clamp(38px,5vw,66px);font-weight:800;line-height:1.08;letter-spacing:-.03em;margin-bottom:22px}
+    .h1-teal{color:#00c8d4}.h1-silver{color:#b8c8d8}
+    .hero-sub{font-size:17px;color:rgba(255,255,255,.6);max-width:480px;line-height:1.75;margin-bottom:38px}
+    .hero-actions{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+    .btn-teal{display:inline-flex;align-items:center;gap:9px;background:#00c8d4;color:#07090f;font-weight:800;font-size:15px;padding:13px 26px;border-radius:100px;cursor:pointer;transition:all .25s;border:none;text-decoration:none}
+    .btn-teal:hover{background:#00e5f0;transform:translateY(-2px);box-shadow:0 10px 30px rgba(0,200,212,.35)}
+    .btn-outline{display:inline-flex;align-items:center;gap:9px;background:transparent;color:#fff;font-weight:600;font-size:15px;padding:13px 26px;border-radius:100px;cursor:pointer;transition:all .25s;border:1.5px solid rgba(255,255,255,.18);text-decoration:none}
+    .btn-outline:hover{border-color:rgba(0,200,212,.5);background:rgba(0,200,212,.06)}
+
+    /* ══ MODULE TABS (hero) ══ */
+    .module-tabs{
+      display:flex;gap:12px;flex-wrap:wrap;align-items:stretch;
+      direction:rtl;
+    }
+    .module-tab{
+      display:flex;flex-direction:column;align-items:flex-start;gap:4px;
+      padding:14px 20px 13px;
+      border-radius:16px;
+      border:1px solid rgba(0,200,212,.22);
+      background:rgba(0,200,212,.05);
+      backdrop-filter:blur(14px);
+      color:#fff;font-family:var(--font);
+      cursor:pointer;text-decoration:none;
+      transition:all .28s cubic-bezier(.4,0,.2,1);
+      position:relative;overflow:hidden;
+      min-width:150px;
+    }
+    .module-tab::after{
+      content:'';position:absolute;inset:0;
+      background:linear-gradient(135deg,rgba(0,200,212,.13),transparent 70%);
+      opacity:0;transition:opacity .28s;pointer-events:none;
+    }
+    .module-tab:hover{
+      border-color:rgba(0,200,212,.65);
+      background:rgba(0,200,212,.1);
+      transform:translateY(-5px);
+      box-shadow:0 12px 36px rgba(0,200,212,.2);
+    }
+    .module-tab:hover::after{opacity:1}
+    .module-tab.primary-tab{
+      border-color:rgba(0,200,212,.55);
+      background:rgba(0,200,212,.1);
+    }
+    .mt-icon{font-size:22px;line-height:1;margin-bottom:2px;}
+    .mt-title{font-size:13px;font-weight:800;color:#fff;letter-spacing:.01em;}
+    .mt-desc{font-size:11px;color:rgba(255,255,255,.45);line-height:1.35;}
+    .hero-stats{display:flex;gap:28px;margin-top:44px;padding-top:36px;border-top:1px solid rgba(255,255,255,.07)}
+    .stat-val{font-size:30px;font-weight:800;color:#00c8d4;letter-spacing:-.02em}
+    .stat-label{font-size:12px;color:rgba(255,255,255,.45);margin-top:2px}
+    .dashboard-card{background:rgba(255,255,255,.03);border:1px solid rgba(0,200,212,.12);border-radius:20px;padding:26px;backdrop-filter:blur(20px);position:relative;overflow:hidden}
+    .dashboard-card::before{content:'';position:absolute;top:0;right:0;left:0;height:1px;background:linear-gradient(90deg,transparent,rgba(0,200,212,.5),transparent)}
+    .dash-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px}
+    .dash-title{font-size:13px;font-weight:700}
+    .dash-badge{background:rgba(0,200,212,.12);color:#00c8d4;font-size:10px;font-weight:700;padding:3px 9px;border-radius:100px;border:1px solid rgba(0,200,212,.25)}
+    .dash-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:18px}
+    .dc{background:rgba(0,53,148,.12);border:1px solid rgba(0,53,148,.22);border-radius:7px;padding:8px 6px;text-align:center;font-size:10px;line-height:1.4}
+    .dc.filled{background:rgba(0,53,148,.35);border-color:rgba(0,200,212,.35)}
+    .dc.teal-cell{background:rgba(0,200,212,.12);border-color:rgba(0,200,212,.35);color:#00c8d4}
+    .dc.hdr{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.06);color:rgba(255,255,255,.35)}
+    .dc.so{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.05)}
+    .dc-name{font-weight:700;display:block;font-size:9px;margin-bottom:2px}
+    .dc-shift{font-size:9px;color:rgba(255,255,255,.4)}
+    .dc.filled .dc-shift{color:rgba(0,200,212,.8)}
+    .dash-footer{display:flex;align-items:center;gap:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,.05)}
+    .dp{flex:1}.dp-lbl{font-size:10px;color:rgba(255,255,255,.4);margin-bottom:5px}
+    .dp-bar{height:3px;background:rgba(255,255,255,.07);border-radius:2px;overflow:hidden}
+    .dp-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,#003594,#00c8d4);animation:pgrow 2s ease-out .5s both}
+    @keyframes pgrow{from{width:0}}
+    .ai-chip{display:flex;align-items:center;gap:5px;background:rgba(0,200,212,.08);border:1px solid rgba(0,200,212,.22);padding:5px 10px;border-radius:100px;font-size:10px;font-weight:700;color:#00c8d4}
+    .ai-dot{width:5px;height:5px;border-radius:50%;background:#00c8d4;animation:aiP 1.5s ease-in-out infinite}
+    @keyframes aiP{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.3;transform:scale(.6)}}
+    .float-card{position:absolute;background:rgba(7,9,15,.92);border:1px solid rgba(255,255,255,.09);border-radius:12px;padding:10px 14px;backdrop-filter:blur(10px);font-size:11px;font-weight:600;box-shadow:0 8px 32px rgba(0,0,0,.4);animation:floatBob 4s ease-in-out infinite}
+    @keyframes floatBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+    .float-card.tr{top:-18px;left:-28px;animation-delay:.6s}
+    .float-card.bl{bottom:-18px;right:-18px;animation-delay:1.8s}
+    .fv{font-size:20px;font-weight:800;color:#00c8d4;display:block}
+    .fl{color:rgba(255,255,255,.45);font-size:10px}
+    .s-head{text-align:center}
+    .s-h{font-size:clamp(26px,3.5vw,42px);font-weight:800;letter-spacing:-.03em;margin-bottom:14px;line-height:1.1}
+    .s-p{font-size:16px;color:rgba(255,255,255,.5);max-width:540px;margin:0 auto;line-height:1.75}
+    #features{background:#060a14}
+    .feat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;margin-top:56px}
+    .feat-card{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);border-radius:18px;padding:34px;transition:all .3s;position:relative;overflow:hidden}
+    .feat-card:hover{border-color:rgba(0,200,212,.25);transform:translateY(-4px);box-shadow:0 16px 48px rgba(0,200,212,.08)}
+    .feat-card.large{grid-column:span 2}
+    .feat-icon{width:52px;height:52px;border-radius:13px;background:rgba(0,200,212,.1);border:1px solid rgba(0,200,212,.2);display:flex;align-items:center;justify-content:center;color:#00c8d4;margin-bottom:20px;transition:all .3s}
+    .feat-card:hover .feat-icon{background:rgba(0,200,212,.18);border-color:rgba(0,200,212,.4)}
+    .feat-h{font-size:19px;font-weight:700;margin-bottom:10px}
+    .feat-p{font-size:14px;color:rgba(255,255,255,.5);line-height:1.7}
+    .feat-card.large .feat-inner{display:grid;grid-template-columns:1fr 1fr;gap:36px;align-items:center}
+    .feat-vis{background:rgba(0,200,212,.05);border-radius:12px;padding:20px;border:1px solid rgba(0,200,212,.1)}
+    .srow{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:12px}
+    .srow:last-child{border-bottom:none}
+    .av{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;flex-shrink:0}
+    .sname{font-weight:700;min-width:70px;font-size:11px}
+    .sshift{flex:1;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;text-align:center}
+    .sm{background:rgba(0,200,212,.12);color:#00c8d4}.se{background:rgba(201,168,76,.12);color:#C9A84C}.sn{background:rgba(160,100,240,.12);color:#b88af8}.so2{background:rgba(255,255,255,.04);color:rgba(255,255,255,.25)}
+    .ck{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:9px}
+    .ck.ok{background:rgba(34,197,94,.12);color:#22c55e}.ck.w{background:rgba(245,158,11,.12);color:#f59e0b}
+    #how{background:#07090f}
+    .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:0;margin-top:56px;position:relative}
+    .steps::before{content:'';position:absolute;top:40px;right:12.5%;left:12.5%;height:1px;background:linear-gradient(90deg,transparent,#003594,#00c8d4,#003594,transparent)}
+    .step{text-align:center;padding:0 18px}
+    .step-num{width:80px;height:80px;border-radius:50%;background:rgba(0,200,212,.08);border:2px solid rgba(0,200,212,.25);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800;color:#00c8d4;margin:0 auto 24px;position:relative;z-index:1;transition:all .3s}
+    .step:hover .step-num{background:rgba(0,200,212,.18);border-color:#00c8d4;box-shadow:0 0 24px rgba(0,200,212,.2)}
+    .step-h{font-size:15px;font-weight:700;margin-bottom:8px}
+    .step-p{font-size:13px;color:rgba(255,255,255,.45);line-height:1.6}
+    #proof{background:linear-gradient(180deg,#060a14 0%,#001133 50%,#060a14 100%);position:relative;overflow:hidden}
+    #proof::before{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:800px;height:800px;border-radius:50%;background:radial-gradient(circle,rgba(0,200,212,.07) 0%,transparent 60%)}
+    .proof-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:56px;position:relative;z-index:1}
+    .proof-card{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.07);border-radius:18px;padding:32px;transition:all .3s}
+    .proof-card:hover{border-color:rgba(0,200,212,.2);transform:translateY(-4px)}
+    .proof-num{font-size:48px;font-weight:800;color:#00c8d4;letter-spacing:-.03em;line-height:1;margin-bottom:6px}
+    .proof-label{font-size:16px;font-weight:700;margin-bottom:7px}
+    .proof-desc{font-size:14px;color:rgba(255,255,255,.5);line-height:1.6}
+    #cta{background:#07090f;padding:110px 24px;position:relative;overflow:hidden}
+    .cta-glow{position:absolute;top:0;left:50%;transform:translateX(-50%);width:600px;height:300px;background:radial-gradient(ellipse at top,rgba(0,200,212,.12) 0%,transparent 65%)}
+    .cta-inner{max-width:680px;margin:0 auto;text-align:center;position:relative;z-index:1}
+    .cta-h{font-size:clamp(30px,4vw,50px);font-weight:800;letter-spacing:-.03em;margin-bottom:18px;line-height:1.1}
+    .cta-p{font-size:16px;color:rgba(255,255,255,.55);margin-bottom:36px;line-height:1.75}
+    .cta-actions{display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap}
+    .btn-lg{padding:15px 34px;font-size:16px}
+    .cta-note{font-size:12px;color:rgba(255,255,255,.25);margin-top:18px}
+    footer{background:#04050a;border-top:1px solid rgba(255,255,255,.05);padding:36px 24px}
+    .footer-inner{max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px}
+    .footer-copy{font-size:12px;color:rgba(255,255,255,.25)}
+    .footer-links{display:flex;gap:20px}
+    .footer-links a{font-size:12px;color:rgba(255,255,255,.3);transition:color .2s}
+    .footer-links a:hover{color:rgba(255,255,255,.7)}
+    .logos-bar{padding:28px 24px;background:rgba(0,0,0,.25);border-top:1px solid rgba(255,255,255,.04);border-bottom:1px solid rgba(255,255,255,.04)}
+    .logos-bar-inner{max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;font-size:12px;color:rgba(255,255,255,.3);font-weight:500}
+    .logos-bar-inner .brand{color:rgba(255,255,255,.55);font-weight:800;letter-spacing:.05em}
+    .logos-bar-inner .sep{opacity:.3}
+    .reveal{opacity:0;transform:translateY(28px);transition:opacity .7s cubic-bezier(.4,0,.2,1),transform .7s cubic-bezier(.4,0,.2,1)}
+    .reveal.visible{opacity:1;transform:translateY(0)}
+    .rd1{transition-delay:.1s}.rd2{transition-delay:.2s}.rd3{transition-delay:.3s}.rd4{transition-delay:.4s}
+    @media(max-width:1024px){
+      .hero-content{grid-template-columns:1fr}.hero-visual{display:none}
+      .feat-grid{grid-template-columns:1fr}.feat-card.large{grid-column:span 1}
+      .feat-card.large .feat-inner{grid-template-columns:1fr}
+      .steps{grid-template-columns:repeat(2,1fr);gap:36px}.steps::before{display:none}
+      .proof-grid{grid-template-columns:repeat(2,1fr)}
+    }
+    @media(max-width:640px){
+      .nav-links{display:none}.section{padding:64px 0}
+      .hero-stats{flex-wrap:wrap;gap:20px}.steps{grid-template-columns:1fr}.proof-grid{grid-template-columns:1fr}
+      .module-tabs{flex-direction:column;gap:10px}
+      .module-tab{min-width:unset;flex-direction:row;align-items:center;gap:12px;padding:13px 18px}
+      .mt-desc{display:none}
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══ SPLASH ══════════════════════════════════════════════════════ -->
+<div id="splash">
+  <canvas id="star-canvas"></canvas>
+  <canvas id="plane-canvas"></canvas>
+  <div class="scan-line"></div>
+  <div class="splash-ambient"></div>
+
+  <div id="globe-wrap">
+    <svg viewBox="0 0 300 300" fill="none" width="300" height="300">
+      <defs>
+        <radialGradient id="globeBase" cx="38%" cy="32%" r="65%">
+          <stop offset="0%" stop-color="#0a2a38"/>
+          <stop offset="45%" stop-color="#062030"/>
+          <stop offset="100%" stop-color="#010810"/>
+        </radialGradient>
+        <radialGradient id="tealOv" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#00c8d4" stop-opacity="0"/>
+          <stop offset="75%" stop-color="#00c8d4" stop-opacity="0"/>
+          <stop offset="100%" stop-color="#00c8d4" stop-opacity=".45"/>
+        </radialGradient>
+        <linearGradient id="ringA" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="#d0e0f0"/>
+          <stop offset="40%" stop-color="#8090a0"/>
+          <stop offset="100%" stop-color="#d0e0f0"/>
+        </linearGradient>
+        <linearGradient id="ringB" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="#a0b0c0"/>
+          <stop offset="50%" stop-color="#607080"/>
+          <stop offset="100%" stop-color="#a0b0c0"/>
+        </linearGradient>
+        <radialGradient id="spec" cx="35%" cy="30%" r="40%">
+          <stop offset="0%" stop-color="white" stop-opacity=".12"/>
+          <stop offset="100%" stop-color="white" stop-opacity="0"/>
+        </radialGradient>
+        <clipPath id="gc"><circle cx="150" cy="150" r="128"/></clipPath>
+        <filter id="og" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur"/>
+          <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0 0 .78 .82 0 0 0 0 .83 0 0 0 0 0 .6 0" result="t"/>
+          <feMerge><feMergeNode in="t"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <circle cx="150" cy="150" r="140" fill="none" stroke="#00c8d4" stroke-width="1" stroke-opacity=".15"/>
+      <circle cx="150" cy="150" r="128" fill="url(#globeBase)" filter="url(#og)"/>
+      <g clip-path="url(#gc)">
+        <ellipse class="grid-line" cx="150" cy="80" rx="90" ry="22" stroke="#00c8d4" stroke-width=".8" stroke-opacity=".35"/>
+        <ellipse class="grid-line" cx="150" cy="112" rx="120" ry="30" stroke="#00c8d4" stroke-width=".8" stroke-opacity=".4"/>
+        <ellipse class="grid-line" cx="150" cy="150" rx="128" ry="36" stroke="#00c8d4" stroke-width="1" stroke-opacity=".5"/>
+        <ellipse class="grid-line" cx="150" cy="188" rx="120" ry="30" stroke="#00c8d4" stroke-width=".8" stroke-opacity=".4"/>
+        <ellipse class="grid-line" cx="150" cy="220" rx="90" ry="22" stroke="#00c8d4" stroke-width=".8" stroke-opacity=".35"/>
+        <path class="grid-line" d="M150 22 Q185 80 190 150 Q185 220 150 278" stroke="#00c8d4" stroke-width=".7" stroke-opacity=".3"/>
+        <path class="grid-line" d="M150 22 Q115 80 110 150 Q115 220 150 278" stroke="#00c8d4" stroke-width=".7" stroke-opacity=".3"/>
+        <path class="grid-line" d="M150 22 Q220 80 248 150 Q220 220 150 278" stroke="#00c8d4" stroke-width=".6" stroke-opacity=".2"/>
+        <path class="grid-line" d="M150 22 Q80 80 52 150 Q80 220 150 278" stroke="#00c8d4" stroke-width=".6" stroke-opacity=".2"/>
+        <line class="grid-line" x1="150" y1="22" x2="150" y2="278" stroke="#00c8d4" stroke-width=".7" stroke-opacity=".25"/>
+        <g opacity=".18" stroke="#00c8d4" stroke-width=".5">
+          <rect x="108" y="120" width="12" height="16" rx="1"/>
+          <rect x="124" y="128" width="12" height="10" rx="1"/>
+          <rect x="140" y="115" width="12" height="22" rx="1"/>
+          <rect x="156" y="124" width="12" height="14" rx="1"/>
+          <rect x="172" y="119" width="12" height="18" rx="1"/>
+          <rect x="108" y="140" width="76" height="3" rx="1" fill="#00c8d4" stroke="none" opacity=".4"/>
+          <rect x="108" y="146" width="76" height="3" rx="1" fill="#00c8d4" stroke="none" opacity=".3"/>
+          <rect x="108" y="152" width="76" height="3" rx="1" fill="#00c8d4" stroke="none" opacity=".2"/>
+        </g>
+        <circle cx="150" cy="150" r="128" fill="url(#tealOv)"/>
+        <circle cx="150" cy="150" r="128" fill="url(#spec)"/>
+        <ellipse cx="118" cy="108" rx="28" ry="20" fill="white" fill-opacity=".04" transform="rotate(-15,118,108)"/>
+      </g>
+      <circle id="globe-glow" cx="150" cy="150" r="128" fill="none" stroke="#00c8d4" stroke-width="2" stroke-opacity=".5"/>
+      <ellipse cx="150" cy="153" rx="136" ry="26" fill="none" stroke="url(#ringA)" stroke-width="9"/>
+      <ellipse cx="150" cy="135" rx="116" ry="18" fill="none" stroke="url(#ringB)" stroke-width="5" stroke-opacity=".7"/>
+      <ellipse cx="150" cy="171" rx="116" ry="18" fill="none" stroke="url(#ringB)" stroke-width="5" stroke-opacity=".7"/>
+    </svg>
+  </div>
+
+  <div id="brand-wrap">
+    <div id="app-name">
+      <span id="letter-i">
+        <span id="sparkle">
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <path d="M11 0 L12.5 9 L22 11 L12.5 13 L11 22 L9.5 13 L0 11 L9.5 9 Z" fill="#00c8d4"/>
+          </svg>
+        </span>
+        I
+      </span>
+      <span id="letter-schedule">schedule</span>
+    </div>
+    <div id="tagline">Ready for <span class="hl">take off</span> in seconds</div>
+    <button id="takeoff-btn" onclick="launchMain()">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+        <path d="M22 2L11 13M22 2L15 22 11 13 2 9l20-7z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Let's Take Off
+    </button>
+  </div>
+</div>
+
+<!-- ══ LANDING PAGE ══════════════════════════════════════════════ -->
+<div id="main-content">
+  <nav id="navbar">
+    <div class="nav-inner">
+      <div class="nav-logo">
+        <svg class="globe-icon" viewBox="0 0 32 32" fill="none">
+          <circle cx="16" cy="16" r="13" fill="#062030" stroke="#00c8d4" stroke-width="1.2" stroke-opacity=".6"/>
+          <ellipse cx="16" cy="16" rx="13" ry="6" fill="none" stroke="#00c8d4" stroke-width=".8" stroke-opacity=".5"/>
+          <line x1="16" y1="3" x2="16" y2="29" stroke="#00c8d4" stroke-width=".8" stroke-opacity=".4"/>
+        </svg>
+        <span><span class="i-letter">I</span>schedule</span>
+      </div>
+      <ul class="nav-links">
+        <li><a href="#features">יכולות</a></li>
+        <li><a href="#how">איך זה עובד</a></li>
+        <li><a href="#proof">נתונים</a></li>
+        <li><a href="#cta" class="nav-cta">בקש דמו</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <section id="hero">
+    <div class="hero-bg"></div><div class="hero-glow"></div>
+    <div class="hero-stars" id="hero-stars"></div>
+    <div class="runway"><div class="runway-lights"><div class="rl"></div><div class="rl"></div><div class="rl"></div><div class="rl"></div></div></div>
+    <div class="radar-ring"></div><div class="radar-ring"></div><div class="radar-ring"></div>
+    <div class="hero-content">
+      <div class="hero-text">
+        <div class="tag reveal">✦ מערכת סידור עבודה של אל על</div>
+        <h1 class="hero-h1 reveal rd1">סידור עבודה<br/><span class="h1-teal">מדויק כמו</span><br/><span class="h1-silver">לוח טיסות</span></h1>
+        <p class="hero-sub reveal rd2">iSchedule מנהלת מאות עובדים בזמן אמת — מונעת התנגשויות, מחלקת סידורים אוטומטית, ומשמרת את הדיוק המבצעי שאל על מצפה לו.</p>
+        <div class="hero-actions reveal rd3">
+          <div class="module-tabs">
+            <a href="/" class="module-tab primary-tab" onclick="return goModule('scheduling')">
+              <span class="mt-icon">🗓️</span>
+              <span class="mt-title">שיבוץ עובדים</span>
+              <span class="mt-desc">לוח מבצעים · גאנט · שיבוץ חכם</span>
+            </a>
+            <a href="/" class="module-tab" onclick="return goModule('distribution')">
+              <span class="mt-icon">📤</span>
+              <span class="mt-title">הפצת סידור</span>
+              <span class="mt-desc">שליחה לעובדים · SMS · אישורים</span>
+            </a>
+            <a href="/" class="module-tab" onclick="return goModule('hr')">
+              <span class="mt-icon">👥</span>
+              <span class="mt-title">כח אדם</span>
+              <span class="mt-desc">עובדים · הסמכות · משמרות</span>
+            </a>
+          </div>
+        </div>
+        <div class="hero-stats reveal rd4">
+          <div><div class="stat-val">95%</div><div class="stat-label">קיצור זמן סידור</div></div>
+          <div><div class="stat-val">0</div><div class="stat-label">טעויות התנגשות</div></div>
+          <div><div class="stat-val">500+</div><div class="stat-label">עובדים מנוהלים</div></div>
+        </div>
+      </div>
+      <div class="hero-visual reveal rd2" style="position:relative">
+        <div class="float-card tr"><span class="fv">+97%</span><span class="fl">יעילות סידור</span></div>
+        <div class="dashboard-card">
+          <div class="dash-header"><span class="dash-title">סידור שבועי — צוות גייט A</span><span class="dash-badge">AI · פעיל</span></div>
+          <div class="dash-grid">
+            <div class="dc hdr"><span class="dc-name">עובד</span></div>
+            <div class="dc hdr"><span class="dc-name">א׳</span></div>
+            <div class="dc hdr"><span class="dc-name">ב׳</span></div>
+            <div class="dc hdr"><span class="dc-name">ג׳</span></div>
+            <div class="dc"><span class="dc-name">א. לוי</span></div>
+            <div class="dc filled"><span class="dc-shift">בוקר</span></div>
+            <div class="dc so"><span class="dc-shift">חופש</span></div>
+            <div class="dc teal-cell"><span class="dc-shift">ערב</span></div>
+            <div class="dc"><span class="dc-name">מ. כהן</span></div>
+            <div class="dc teal-cell"><span class="dc-shift">ערב</span></div>
+            <div class="dc filled"><span class="dc-shift">בוקר</span></div>
+            <div class="dc filled"><span class="dc-shift">בוקר</span></div>
+            <div class="dc"><span class="dc-name">ר. דוד</span></div>
+            <div class="dc so"><span class="dc-shift">חופש</span></div>
+            <div class="dc teal-cell"><span class="dc-shift">ערב</span></div>
+            <div class="dc filled"><span class="dc-shift">בוקר</span></div>
+          </div>
+          <div class="dash-footer">
+            <div class="dp"><div class="dp-lbl">כיסוי משמרות: 91%</div><div class="dp-bar"><div class="dp-fill" style="width:91%"></div></div></div>
+            <div class="ai-chip"><div class="ai-dot"></div>AI ממטב</div>
+          </div>
+        </div>
+        <div class="float-card bl"><span class="fv">✓</span><span class="fl">שוּלח ל-248 עובדים</span></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="logos-bar">
+    <div class="logos-bar-inner">
+      <span>מופעל עבור</span><span class="sep">·</span>
+      <span class="brand">אל על</span><span class="sep">·</span>
+      <span>פעיל בנמל התעופה בן גוריון</span><span class="sep">·</span>
+      <span>500+ עובדים</span><span class="sep">·</span><span>24/7</span>
+    </div>
+  </div>
+
+  <section id="features" class="section">
+    <div class="container">
+      <div class="s-head">
+        <div class="tag reveal">⚡ יכולות המערכת</div>
+        <h2 class="s-h reveal rd1">כל מה שצריך<br/>לסידור עבודה מושלם</h2>
+        <p class="s-p reveal rd2">מנוע AI שמבין את מורכבות עולם התעופה.</p>
+      </div>
+      <div class="feat-grid">
+        <div class="feat-card large reveal">
+          <div class="feat-inner">
+            <div>
+              <div class="feat-icon"><svg width="26" height="26" viewBox="0 0 26 26" fill="none"><path d="M13 3C7.477 3 3 7.477 3 13s4.477 10 10 10 10-4.477 10-10S18.523 3 13 3Z" stroke="currentColor" stroke-width="1.5"/><path d="M13 7v6l4 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></div>
+              <h3 class="feat-h">סידור בזמן שניות</h3>
+              <p class="feat-p">מה שלקח שעות — iSchedule עושה תוך שניות. סידור אופטימלי על בסיס נתוני עובדים, חופשות, הסמכות ותנאי עבודה.</p>
+            </div>
+            <div class="feat-vis">
+              <div class="srow"><div class="av" style="background:#003594">אל</div><span class="sname">אסתר לוי</span><span class="sshift sm">06:00–14:00</span><div class="ck ok">✓</div></div>
+              <div class="srow"><div class="av" style="background:#0047c0">מכ</div><span class="sname">מירי כהן</span><span class="sshift se">14:00–22:00</span><div class="ck ok">✓</div></div>
+              <div class="srow"><div class="av" style="background:#5d4a99">רד</div><span class="sname">רון דוד</span><span class="sshift sn">22:00–06:00</span><div class="ck ok">✓</div></div>
+              <div class="srow"><div class="av" style="background:#1a5f3c">יב</div><span class="sname">יוסי ב״ד</span><span class="sshift so2">חופש</span><div class="ck w">!</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="feat-card reveal rd1">
+          <div class="feat-icon"><svg width="26" height="26" viewBox="0 0 26 26" fill="none"><path d="M5 13h16M5 7h16M5 19h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></div>
+          <h3 class="feat-h">ניהול מאות עובדים</h3>
+          <p class="feat-p">ממשק אחד לניהול תפקידים, הסמכות, מגבלות חוק ועדיפויות אישיות.</p>
+        </div>
+        <div class="feat-card reveal rd2">
+          <div class="feat-icon"><svg width="26" height="26" viewBox="0 0 26 26" fill="none"><path d="M13 3L3 9v8l10 6 10-6V9L13 3Z" stroke="currentColor" stroke-width="1.5"/><path d="M13 3v14M3 9l10 4 10-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></div>
+          <h3 class="feat-h">אפס טעויות</h3>
+          <p class="feat-p">המערכת מזהה התנגשויות, חריגות חוק וכפילויות אוטומטית.</p>
+        </div>
+        <div class="feat-card reveal rd1">
+          <div class="feat-icon"><svg width="26" height="26" viewBox="0 0 26 26" fill="none"><rect x="3" y="7" width="20" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M8 7V5M13 7V5M18 7V5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M7 13h4M7 16h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></div>
+          <h3 class="feat-h">הפצה אוטומטית</h3>
+          <p class="feat-p">הסידור מופץ ישירות לכל עובד — SMS, אפליקציה, אימייל.</p>
+        </div>
+        <div class="feat-card reveal rd2">
+          <div class="feat-icon"><svg width="26" height="26" viewBox="0 0 26 26" fill="none"><path d="M3 19l6-8 4 4 4-6 6 9H3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></div>
+          <h3 class="feat-h">דוחות ואנליטיקה</h3>
+          <p class="feat-p">לוחות בקרה בזמן אמת: נוכחות, כיסוי משמרות, שעות נוספות.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="how" class="section">
+    <div class="container">
+      <div class="s-head">
+        <div class="tag reveal">⏱ תהליך העבודה</div>
+        <h2 class="s-h reveal rd1">מסידור ידני<br/>לאוטומציה מלאה</h2>
+        <p class="s-p reveal rd2">4 שלבים. דקות ספורות. סידור מושלם.</p>
+      </div>
+      <div class="steps">
+        <div class="step reveal"><div class="step-num">1</div><h3 class="step-h">הגדרת צוות</h3><p class="step-p">מייבאים עובדים, תפקידים והסמכות לפעם אחת.</p></div>
+        <div class="step reveal rd1"><div class="step-num">2</div><h3 class="step-h">קלט מנהל</h3><p class="step-p">מוסיפים דרישות שבועיות וכיסוי מינימלי.</p></div>
+        <div class="step reveal rd2"><div class="step-num">3</div><h3 class="step-h">AI ממטב</h3><p class="step-p">המנוע מחשב את הסידור האופטימלי תוך שניות.</p></div>
+        <div class="step reveal rd3"><div class="step-num">4</div><h3 class="step-h">הפצה אוטומטית</h3><p class="step-p">הסידור מאושר ומופץ לכל הצוות.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="proof" class="section">
+    <div class="container">
+      <div class="s-head">
+        <div class="tag reveal">📊 מספרים שמדברים</div>
+        <h2 class="s-h reveal rd1">תוצאות אמיתיות<br/>מהשטח</h2>
+      </div>
+      <div class="proof-grid">
+        <div class="proof-card reveal"><div class="proof-num">95%</div><div class="proof-label">קיצור זמן סידור</div><div class="proof-desc">מה שלקח שעות — iSchedule מבצעת תוך דקות.</div></div>
+        <div class="proof-card reveal rd1"><div class="proof-num">0</div><div class="proof-label">טעויות התנגשות</div><div class="proof-desc">אפס כפילויות, אפס חריגות חוק.</div></div>
+        <div class="proof-card reveal rd2"><div class="proof-num">500+</div><div class="proof-label">עובדים מנוהלים</div><div class="proof-desc">מנהלת מאות עובדים מצוותים שונים בו-זמנית.</div></div>
+        <div class="proof-card reveal rd1"><div class="proof-num">3 דק׳</div><div class="proof-label">לסידור שבועי מלא</div><div class="proof-desc">הפקת סידור מלא לכל הצוות תוך שלוש דקות.</div></div>
+        <div class="proof-card reveal rd2"><div class="proof-num">100%</div><div class="proof-label">שקיפות לעובדים</div><div class="proof-desc">כל עובד מקבל את הסידור ישירות לנייד.</div></div>
+        <div class="proof-card reveal rd3"><div class="proof-num">24/7</div><div class="proof-label">זמינות מערכת</div><div class="proof-desc">פעילות רציפה לאורך השעון.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="cta">
+    <div class="cta-glow"></div>
+    <div class="cta-inner">
+      <div class="tag reveal" style="display:inline-flex">✈ מוכנים להמריא?</div>
+      <h2 class="cta-h reveal rd1">הפסיקו לסדר<br/><span style="color:#00c8d4">ידנית.</span></h2>
+      <p class="cta-p reveal rd2">צרו קשר עוד היום לדמו מותאם עבור צוות אל על.</p>
+      <div class="cta-actions reveal rd3">
+        <a href="mailto:demo@ischedule.ai" class="btn-teal btn-lg">בקש דמו חינם</a>
+        <a href="tel:+972-3-0000000" class="btn-outline btn-lg">דבר עם צוות המכירות</a>
+      </div>
+      <p class="cta-note reveal rd4">ללא התחייבות · הדמו כולל נתונים אמיתיים מהצוות שלכם</p>
+    </div>
+  </section>
+
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-copy">© 2025 iSchedule. כל הזכויות שמורות.</div>
+      <div class="footer-links"><a href="#">פרטיות</a><a href="#">תנאי שימוש</a><a href="#">צור קשר</a></div>
+    </div>
+  </footer>
+</div>
+
+<script>
+/* ── Stars ── */
+(function(){
+  const c=document.getElementById('star-canvas'),ctx=c.getContext('2d');
+  let stars=[],raf;
+  function resize(){c.width=innerWidth;c.height=innerHeight}
+  function init(){stars=Array.from({length:130},()=>({x:Math.random()*innerWidth,y:Math.random()*innerHeight,r:Math.random()*1.4+.3,phase:Math.random()*Math.PI*2,speed:Math.random()*.006+.002}))}
+  let t=0;
+  function draw(){ctx.clearRect(0,0,c.width,c.height);stars.forEach(s=>{const a=.12+.7*Math.abs(Math.sin(t*s.speed+s.phase));ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);ctx.fillStyle=`rgba(255,255,255,${a})`;ctx.fill()});t++;raf=requestAnimationFrame(draw)}
+  resize();init();draw();
+  window.addEventListener('resize',()=>{resize();init()});
+  window._stopStars=()=>cancelAnimationFrame(raf);
+})();
+
+/* ── Paper plane canvas engine ── */
+const pc = document.getElementById('plane-canvas');
+const ctx = pc.getContext('2d');
+function resizePC(){ pc.width=innerWidth; pc.height=innerHeight; }
+resizePC();
+window.addEventListener('resize', resizePC);
+
+const ORBIT_RADIUS = 158;
+let trail = [];
+let phase = 'idle';
+let phaseT0 = 0;
+let orbitStartAngle = 0;
+let orbitStartRadius = 0;
+let mergeStartX = 0, mergeStartY = 0, mergeStartAngle = 0;
+let lastFlyX = 0, lastFlyY = 0;
+let planeRaf;
+
+function ease(t){ return t<.5 ? 2*t*t : -1+(4-2*t)*t }   // ease-in-out
+function smoothstep(t){ return t*t*(3-2*t) }
+
+function getGlobeCenter(){
+  const r = document.getElementById('globe-wrap').getBoundingClientRect();
+  return { x: r.left+r.width/2, y: r.top+r.height/2 };
+}
+
+// Fly-path waypoints (screen-size relative, computed fresh each call)
+function flyWaypoints(){
+  const W=innerWidth, H=innerHeight;
+  // End near upper-right of globe so orbit starts naturally
+  const gc = getGlobeCenter();
+  const endAngle = -Math.PI * 0.4; // arrive at upper-right of globe
+  const endX = gc.x + ORBIT_RADIUS * Math.cos(endAngle);
+  const endY = gc.y + ORBIT_RADIUS * Math.sin(endAngle);
+  return [
+    { x:-90,       y:H*.60 },
+    { x:W*.07,     y:H*.33 },
+    { x:W*.20,     y:H*.17 },
+    { x:W*.36,     y:H*.27 },
+    { x:W*.52,     y:H*.10 },
+    { x:W*.67,     y:H*.23 },
+    { x:W*.82,     y:H*.12 },
+    { x:W*.74,     y:H*.35 },
+    { x:endX,      y:endY  },   // lands at orbit start position
+  ];
+}
+
+function interpolate(pts, t){
+  const n = pts.length-1;
+  const sc = t*n;
+  const seg = Math.min(Math.floor(sc), n-1);
+  const st = smoothstep(sc-seg);
+  const p0=pts[seg], p1=pts[seg+1];
+  const dx=p1.x-p0.x, dy=p1.y-p0.y;
+  return { x:p0.x+dx*st, y:p0.y+dy*st, angle:Math.atan2(dy,dx) };
+}
+
+function drawPaperPlane(x, y, angle, scale, alpha){
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.scale(scale, scale);
+
+  ctx.shadowColor = 'rgba(0,200,212,.35)';
+  ctx.shadowBlur  = 14;
+
+  // Top face
+  ctx.beginPath();
+  ctx.moveTo(-44,-21); ctx.lineTo(46,0); ctx.lineTo(-44,4); ctx.closePath();
+  const tg = ctx.createLinearGradient(-44,-21,46,4);
+  tg.addColorStop(0,'#ddeaf8'); tg.addColorStop(1,'#f2f8ff');
+  ctx.fillStyle=tg;
+  ctx.fill();
+  ctx.strokeStyle='rgba(155,178,210,.65)'; ctx.lineWidth=.7; ctx.stroke();
+
+  // Bottom face
+  ctx.beginPath();
+  ctx.moveTo(-44,4); ctx.lineTo(46,0); ctx.lineTo(-44,24); ctx.closePath();
+  const bg=ctx.createLinearGradient(-44,4,46,24);
+  bg.addColorStop(0,'#c5d6ec'); bg.addColorStop(1,'#a4b6cc');
+  ctx.fillStyle=bg; ctx.fill();
+  ctx.strokeStyle='rgba(130,155,188,.5)'; ctx.lineWidth=.6; ctx.stroke();
+
+  // Crease dashed line
+  ctx.beginPath();
+  ctx.moveTo(-44,4); ctx.lineTo(34,.8);
+  ctx.strokeStyle='rgba(100,135,175,.5)';
+  ctx.setLineDash([4,3]); ctx.lineWidth=.7; ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Nose highlight
+  ctx.beginPath();
+  ctx.moveTo(36,-1); ctx.lineTo(46,0); ctx.lineTo(36,1); ctx.closePath();
+  ctx.fillStyle='rgba(240,252,255,.9)'; ctx.fill();
+
+  // Teal shimmer on leading edge
+  ctx.beginPath();
+  ctx.moveTo(-44,-21); ctx.lineTo(46,0);
+  ctx.strokeStyle='rgba(0,200,212,.22)'; ctx.lineWidth=.6; ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawTrail(pts){
+  const len=pts.length;
+  pts.forEach((p,i)=>{
+    if(i%6!==0) return;
+    const age=len-i, maxAge=90;
+    const a=Math.max(0,(1-age/maxAge))*.7;
+    const r=Math.max(0,2.8*(1-age/(maxAge*1.3)));
+    if(r<=0||a<=0) return;
+    ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2);
+    ctx.fillStyle=`rgba(0,200,212,${a})`; ctx.fill();
+  });
+}
+
+function animLoop(ts){
+  ctx.clearRect(0,0,pc.width,pc.height);
+  const elapsed = ts - phaseT0;
+
+  if(phase==='fly'){
+    const dur=2700, t=Math.min(elapsed/dur,1);
+    const pts=flyWaypoints();
+    const pos=interpolate(pts,t);
+    lastFlyX=pos.x; lastFlyY=pos.y;
+    trail.push({x:pos.x,y:pos.y});
+    if(trail.length>300) trail.shift();
+    drawTrail(trail);
+    drawPaperPlane(pos.x,pos.y,pos.angle,1,1);
+    if(t>=1){
+      phase='orbit'; phaseT0=ts;
+      const gc=getGlobeCenter();
+      orbitStartAngle=Math.atan2(lastFlyY-gc.y, lastFlyX-gc.x);
+      orbitStartRadius=Math.hypot(lastFlyX-gc.x, lastFlyY-gc.y);
+      trail=[];
+    }
+
+  } else if(phase==='orbit'){
+    const dur=2400, t=Math.min(elapsed/dur,1);
+    const totalAngle=Math.PI*2*1.5; // 1.5 clockwise orbits
+    const orbitAngle=orbitStartAngle+totalAngle*ease(t);
+
+    // Smoothly adjust radius to ORBIT_RADIUS over first 20% of orbit
+    const rEase=smoothstep(Math.min(t/.2,1));
+    const radius=orbitStartRadius+(ORBIT_RADIUS-orbitStartRadius)*rEase;
+
+    const gc=getGlobeCenter();
+    const x=gc.x+radius*Math.cos(orbitAngle);
+    const y=gc.y+radius*Math.sin(orbitAngle);
+    const planeAngle=orbitAngle+Math.PI/2; // face tangent (clockwise)
+
+    trail.push({x,y});
+    if(trail.length>220) trail.shift();
+    drawTrail(trail);
+    drawPaperPlane(x,y,planeAngle,1,1);
+
+    if(t>=1){
+      phase='merge'; phaseT0=ts;
+      mergeStartX=x; mergeStartY=y; mergeStartAngle=planeAngle;
+      trail=[];
+    }
+
+  } else if(phase==='merge'){
+    const dur=750, t=Math.min(elapsed/dur,1);
+    const gc=getGlobeCenter();
+    const ease2=smoothstep(t);
+    const x=mergeStartX+(gc.x-mergeStartX)*ease2;
+    const y=mergeStartY+(gc.y-mergeStartY)*ease2;
+    const sc=1-ease2*.95;
+    const al=1-ease2;
+    drawPaperPlane(x,y,mergeStartAngle,sc,al);
+
+    // Central glow grows as plane arrives
+    if(ease2>.4){
+      const ga=(ease2-.4)/0.6*.8;
+      const gr=ctx.createRadialGradient(gc.x,gc.y,0,gc.x,gc.y,40*ease2);
+      gr.addColorStop(0,`rgba(0,200,212,${ga})`);
+      gr.addColorStop(1,'rgba(0,200,212,0)');
+      ctx.beginPath(); ctx.arc(gc.x,gc.y,40*ease2,0,Math.PI*2);
+      ctx.fillStyle=gr; ctx.fill();
+    }
+
+    if(t>=1){
+      phase='done';
+      ctx.clearRect(0,0,pc.width,pc.height);
+      // Globe flashes briefly
+      document.getElementById('globe-glow').style.strokeOpacity='1';
+      setTimeout(()=>{ document.getElementById('globe-glow').style.strokeOpacity='.5'; },300);
+      // Text sequence
+      setTimeout(()=>{ document.getElementById('letter-i').classList.add('appear'); document.getElementById('sparkle').classList.add('appear'); },250);
+      setTimeout(()=>  document.getElementById('letter-schedule').classList.add('appear'), 680);
+      setTimeout(()=>  document.getElementById('tagline').classList.add('appear'), 1200);
+      setTimeout(()=>  document.getElementById('takeoff-btn').classList.add('appear'), 1950);
+      return;
+    }
+  }
+
+  planeRaf=requestAnimationFrame(animLoop);
+}
+
+/* ── Sequence kick-off ── */
+// 1. Globe appears
+setTimeout(()=> document.getElementById('globe-wrap').classList.add('appear'), 300);
+
+// 2. Paper plane starts flying across screen
+setTimeout(()=>{
+  phase='fly';
+  phaseT0=0; // will be set on first rAF
+  planeRaf=requestAnimationFrame(ts=>{ phaseT0=ts; animLoop(ts); });
+}, 1300);
+
+/* ── Launch main ── */
+function launchMain(){
+  const splash=document.getElementById('splash');
+  const main=document.getElementById('main-content');
+  const btn=document.getElementById('takeoff-btn');
+  btn.style.transform='scale(.95)';
+  btn.style.boxShadow='0 0 60px rgba(0,200,212,.8)';
+  setTimeout(()=>{
+    splash.classList.add('exit');
+    main.style.display='block';
+    setTimeout(()=>{ main.classList.add('visible'); window._stopStars&&window._stopStars(); },100);
+    setTimeout(()=>{ splash.style.display='none'; },1000);
+  },200);
+}
+
+/* ── Navigate to app module ── */
+function goModule(module){
+  const splash=document.getElementById('splash');
+  // flash the tab
+  document.querySelectorAll('.module-tab').forEach(t=>t.style.transition='all .15s');
+  setTimeout(()=>{
+    splash.style.transition='opacity .5s ease-out';
+    splash.style.opacity='0';
+    setTimeout(()=>{
+      // Replace with your Streamlit app URL:
+      window.location.href = '/?module=' + module;
+    }, 500);
+  }, 120);
+  return false;
+}
+
+/* ── Hero stars ── */
+const hs=document.getElementById('hero-stars');
+for(let i=0;i<70;i++){
+  const s=document.createElement('div');s.className='hstar';
+  const sz=Math.random()*2+.5;
+  s.style.cssText=`width:${sz}px;height:${sz}px;top:${Math.random()*80}%;left:${Math.random()*100}%;animation-delay:${Math.random()*4}s;animation-duration:${2+Math.random()*3}s`;
+  hs.appendChild(s);
+}
+
+/* ── Sticky nav ── */
+const navbar=document.getElementById('navbar');
+window.addEventListener('scroll',()=>navbar.classList.toggle('scrolled',scrollY>40),{passive:true});
+
+/* ── Scroll reveal ── */
+const ro=new IntersectionObserver(entries=>entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');ro.unobserve(e.target)}}),{threshold:.1,rootMargin:'0px 0px -30px 0px'});
+document.querySelectorAll('.reveal').forEach(el=>ro.observe(el));
+</script>
+</body>
+</html>
