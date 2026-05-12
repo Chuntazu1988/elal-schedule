@@ -318,14 +318,7 @@ if _gantt_swap:
                 _swap_msg = f"✅ שיבוץ עודכן: {_new_wrkr}"
     except Exception as _e:
         _swap_msg = f"שגיאה: {_e}"
-    # שלח תוצאה חזרה לגאנט דרך hidden component
-    _ok = "✅" in _swap_msg
-    _components.html(f"""<script>
-if(window.opener && !window.opener.closed){{
-  window.opener.postMessage({{type:"gantt_swap_result",ok:{"true" if _ok else "false"},msg:"{_swap_msg}"}}, "*");
-}}
-localStorage.removeItem("gantt_swap_pending");
-</script>""", height=0)
+
     if _swap_msg:
         st.session_state["_gantt_swap_msg"] = _swap_msg
     st.session_state["show_gantt_page"] = True
@@ -1607,10 +1600,10 @@ const WORKERS={gdata};
 const RCOLORS={rcolors};
 const DATA_MIN={g_min},DATA_MAX={g_max};
 const LW=140;
-let HPX=80; // fixed — always 55px per hour, user scrolls horizontally
+let HPX=90; // fixed — always 55px per hour, user scrolls horizontally
 
-// ── Window view: DATA_MIN → DATA_MAX, shiftable by 3h ──
-const VIEW_HOURS = DATA_MAX - DATA_MIN; // show full data range
+// ── Window view: 8h window, shiftable by 3h ──
+const VIEW_HOURS = 8;                  // hours visible at once
 let viewStart = DATA_MIN;              // current window start
 
 function hfmt(h) {{ return String(h%24).padStart(2,"0")+":00"; }}
@@ -1642,7 +1635,7 @@ function renderGantt(){{
   const DAY_MAX=viewStart + VIEW_HOURS;
   const HOURS=VIEW_HOURS;
   updateLabel();
-  HPX=80; // fixed px per hour
+  HPX=90; // fixed px per hour
   const TOTAL_W=LW+HOURS*HPX+40;
   const inner=document.getElementById("inner");
   inner.innerHTML="";
@@ -1848,8 +1841,7 @@ WORKERS.forEach(w=>{{
         if(targetRow&&targetRow.dataset.worker!==w.name){{
           const encoded=dragInfo.idx+":"+encodeURIComponent(targetRow.dataset.worker);
           localStorage.setItem("gantt_swap_pending",encoded);
-          if(window.opener&&!window.opener.closed)
-            window.opener.postMessage({{type:"gantt_swap",payload:encoded}},"*");
+          window.parent.location.href=window.parent.location.href.split("?")[0]+"?gantt_swap="+encoded;
         }}
       }}
       dragInfo=null;
@@ -1873,19 +1865,7 @@ WORKERS.forEach(w=>{{
     if(dragInfo&&dragInfo.worker!==w.name){{
       const encoded=dragInfo.idx+":"+encodeURIComponent(w.name);
       // שלח דרך localStorage — ללא קפיצה
-      localStorage.setItem("gantt_swap_pending", encoded);
-      localStorage.setItem("gantt_swap_ts", Date.now());
-      // הצג אישור זמני
-      const fb=document.createElement("div");
-      fb.style.cssText="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);"
-        +"background:#0d1f30;color:#00c9be;border:1px solid #00c9be;border-radius:12px;"
-        +"padding:16px 24px;font-size:14px;font-weight:800;z-index:9999;direction:rtl;";
-      fb.textContent="⏳ מעדכן שיבוץ...";
-      document.body.appendChild(fb);
-      setTimeout(()=>fb.remove(), 2000);
-      if(window.opener && !window.opener.closed){{
-        window.opener.postMessage({{type:"gantt_swap",payload:encoded}}, "*");
-      }}
+      window.parent.location.href=window.parent.location.href.split("?")[0]+"?gantt_swap="+encoded;
     }}
   }});
 
@@ -1955,11 +1935,7 @@ if(MISSING && MISSING.length > 0){{
         const targetRow = target.closest(".wrow");
         if(targetRow) {{
           const encoded = dragInfo.idx + ":" + encodeURIComponent(targetRow.dataset.worker);
-          localStorage.setItem("gantt_swap_pending", encoded);
-          localStorage.setItem("gantt_swap_ts", Date.now());
-          if(window.opener && !window.opener.closed) {{
-            window.opener.postMessage({{type:"gantt_swap",payload:encoded}}, "*");
-          }}
+          window.parent.location.href=window.parent.location.href.split("?")[0]+"?gantt_swap="+encoded;
         }}
       }}
       dragInfo = null;
@@ -1988,23 +1964,8 @@ if(MISSING && MISSING.length > 0){{
         f"const MISSING={missing_json};\nconst WORKERS="
     )
 
-    # ── פתח בחלון חדש דרך Blob URL ──
-    import base64 as _b64
-    _encoded = _b64.b64encode(gantt_html_final.encode("utf-8")).decode("ascii")
-    _open_js = f"""
-    <script>
-    (function() {{
-        var b64 = "{_encoded}";
-        var bin = atob(b64);
-        var bytes = new Uint8Array(bin.length);
-        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        var blob = new Blob([bytes], {{type: "text/html; charset=utf-8"}});
-        var url  = URL.createObjectURL(blob);
-        window.open(url, "_blank");
-    }})();
-    </script>
-    """
-    _components.html(_open_js, height=0)
+    # ── הצג ישירות בתוך Streamlit ──
+    _components.html(gantt_html_final, height=820, scrolling=False)
 
 
 
@@ -2027,24 +1988,7 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
             st.markdown(f'<div style="color:{_color};font-weight:800;font-size:14px;padding:4px 0;">{_smsg}</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div style="direction:rtl;font-size:18px;font-weight:900;color:#00c9be;padding:6px 0;">📅 גאנט עובדים</div>', unsafe_allow_html=True)
-    # Bridge: polls localStorage for pending swap (works across tabs)
-    _components.html("""<script>
-(function() {
-  function check() {
-    try {
-      var pending = localStorage.getItem("gantt_swap_pending");
-      if (pending) {
-        localStorage.removeItem("gantt_swap_pending");
-        window.parent.location.href =
-          window.parent.location.href.split("?")[0] + "?gantt_swap=" + pending;
-        return;
-      }
-    } catch(e) {}
-    setTimeout(check, 400);
-  }
-  check();
-})();
-</script>""", height=0)
+
     _sched = st.session_state["schedule_df"]
     _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
     _render_interactive_gantt(_sched, _sched, missing_df=_miss)
