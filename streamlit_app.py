@@ -1616,7 +1616,8 @@ let viewStart = DATA_MIN;              // current window start
 function hfmt(h) {{ return String(h%24).padStart(2,"0")+":00"; }}
 
 function shiftView(delta) {{
-  viewStart = Math.max(0, Math.min(viewStart + delta, 25 - VIEW_HOURS));
+  const maxStart = Math.max(0, DATA_MAX - VIEW_HOURS);
+  viewStart = Math.max(DATA_MIN, Math.min(viewStart + delta, maxStart));
   renderGantt();
 }}
 
@@ -1645,7 +1646,7 @@ function renderGantt(){{
   const TOTAL_W=LW+HOURS*HPX+40;
   const inner=document.getElementById("inner");
   inner.innerHTML="";
-  inner.style.cssText=`position:relative;width:${{TOTAL_W+80}}px;min-width:${{TOTAL_W+80}}px;`;
+  inner.style.cssText=`position:relative;width:${{TOTAL_W+160}}px;min-width:${{TOTAL_W+160}}px;`;
   // current time for departed detection
   const _now=new Date();
   const _nowMin=_now.getHours()*60+_now.getMinutes();
@@ -1673,7 +1674,7 @@ hdrLbl.className="hdr-lbl";
 hdrRow.appendChild(hdrLbl);
 const hdrHrs=document.createElement("div");
 hdrHrs.className="hdr-hours";
-hdrHrs.style.width=`${{HOURS*HPX+40}}px`;
+hdrHrs.style.width=`${{HOURS*HPX+160}}px`;
 for(let h=0;h<=HOURS;h++){{
   const tick=document.createElement("div");
   tick.className="h-tick";
@@ -1769,7 +1770,7 @@ WORKERS.forEach(w=>{{
   // Timeline
   const tl=document.createElement("div");
   tl.className="timeline";
-  tl.style.width=(HOURS*HPX+40)+"px";
+  tl.style.width=(HOURS*HPX+160)+"px";
 
   // Vertical grid lines
   for(let h=0;h<=HOURS;h++){{
@@ -2026,13 +2027,23 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
             st.markdown(f'<div style="color:{_color};font-weight:800;font-size:14px;padding:4px 0;">{_smsg}</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div style="direction:rtl;font-size:18px;font-weight:900;color:#00c9be;padding:6px 0;">📅 גאנט עובדים</div>', unsafe_allow_html=True)
-    # Bridge: listens for postMessage from blob gantt tab and triggers swap via query param
+    # Bridge: polls localStorage for pending swap (works across tabs)
     _components.html("""<script>
-window.addEventListener("message", function(e) {
-  if(e.data && e.data.type === "gantt_swap") {
-    window.location.href = window.location.href.split("?")[0] + "?gantt_swap=" + e.data.payload;
+(function() {
+  function check() {
+    try {
+      var pending = localStorage.getItem("gantt_swap_pending");
+      if (pending) {
+        localStorage.removeItem("gantt_swap_pending");
+        window.parent.location.href =
+          window.parent.location.href.split("?")[0] + "?gantt_swap=" + pending;
+        return;
+      }
+    } catch(e) {}
+    setTimeout(check, 400);
   }
-});
+  check();
+})();
 </script>""", height=0)
     _sched = st.session_state["schedule_df"]
     _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
