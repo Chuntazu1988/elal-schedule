@@ -1565,11 +1565,7 @@ const WORKERS={gdata};
 const RCOLORS={rcolors};
 const DATA_MIN={g_min},DATA_MAX={g_max};
 const LW=140;
-let HPX=40; // updated by renderGantt
-function calcHPX(hours){{
-  const avail = window.innerWidth - LW - 24;
-  return Math.max(18, Math.floor(avail / hours));
-}}
+let HPX=55; // fixed — always 55px per hour, user scrolls horizontally
 
 // ── Populate time selectors ──
 const selFrom=document.getElementById("sel-from");
@@ -1601,7 +1597,7 @@ function renderGantt(){{
   const DAY_MIN=parseInt(selFrom.value);
   const DAY_MAX=parseInt(selTo.value)  >DAY_MIN ? parseInt(selTo.value) : DAY_MIN+1;
   const HOURS=DAY_MAX-DAY_MIN;
-  HPX=calcHPX(HOURS); // update module-level HPX
+  HPX=55; // fixed px per hour
   const TOTAL_W=LW+HOURS*HPX+40;
   const inner=document.getElementById("inner");
   inner.innerHTML="";
