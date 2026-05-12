@@ -1515,8 +1515,9 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
                 "color": "#374151", "abbr": ROLE_ABBR.get(role, role[:4]),
             })
 
-    gdata = _j.dumps(workers_data, ensure_ascii=True)
-    mdata = _j.dumps(missing_data, ensure_ascii=True)
+    import base64 as _b64j
+    gdata = _b64j.b64encode(_j.dumps(workers_data, ensure_ascii=False).encode("utf-8")).decode("ascii")
+    mdata = _b64j.b64encode(_j.dumps(missing_data, ensure_ascii=False).encode("utf-8")).decode("ascii")
 
     # ── Streamlit base URL for swap navigation ──
     try:
@@ -1593,7 +1594,7 @@ html,body{{height:100%;background:#04080f;color:#c8d8ec;
 <div id="outer"><div id="inner"></div></div>
 <div id="tray"><div id="tray-inner"></div></div>
 <script>
-const W={gdata}, MISS={mdata};
+const W=JSON.parse(atob("{gdata}")), MISS=JSON.parse(atob("{mdata}"));
 const G_MIN={g_min}, G_MAX={g_max};
 const ST_BASE="{_st_base}";
 const LW=110, HPX=42;
