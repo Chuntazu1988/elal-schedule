@@ -1549,6 +1549,7 @@ const WORKERS={gdata};
 const RCOLORS={rcolors};
 const DATA_MIN={g_min},DATA_MAX={g_max};
 const LW=140;
+let HPX=40; // updated by renderGantt
 function calcHPX(hours){{
   const avail = window.innerWidth - LW - 24;
   return Math.max(18, Math.floor(avail / hours));
@@ -1562,15 +1563,17 @@ for(let h=0;h<=25;h++){{
   const o1=new Option(lbl,h); selFrom.appendChild(o1);
   const o2=new Option(lbl,h); selTo.appendChild(o2);
 }}
+// default: show first 12 hours of data (or all if less)
 selFrom.value=DATA_MIN;
-selTo.value  =Math.min(DATA_MAX,25);
+selTo.value=Math.min(DATA_MIN+12, DATA_MAX, 25);
+if(parseInt(selTo.value)<=parseInt(selFrom.value)) selTo.value=Math.min(DATA_MAX,25);
 selFrom.addEventListener("change",renderGantt);
 selTo.addEventListener("change",  renderGantt);
 
 function h2px(s,dayMin){{
   if(!s||s==="nan")return 0;
   const p=s.split(":");
-  return(parseInt(p[0]||0)+parseInt(p[1]||0)/60-dayMin)*HPX;
+  return Math.max(0,(parseInt(p[0]||0)+parseInt(p[1]||0)/60-dayMin)*HPX);
 }}
 function t2min(s){{
   if(!s||s==="nan")return 0;
@@ -1582,7 +1585,7 @@ function renderGantt(){{
   const DAY_MIN=parseInt(selFrom.value);
   const DAY_MAX=parseInt(selTo.value)  >DAY_MIN ? parseInt(selTo.value) : DAY_MIN+1;
   const HOURS=DAY_MAX-DAY_MIN;
-  const HPX=calcHPX(HOURS);
+  HPX=calcHPX(HOURS); // update module-level HPX
   const TOTAL_W=LW+HOURS*HPX+40;
   const inner=document.getElementById("inner");
   inner.innerHTML="";
