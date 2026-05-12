@@ -1336,7 +1336,7 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
     _end_max = all_e.dt.hour.max() + (1 if all_e.dt.minute.max() > 0 else 0)
     g_max = min(int(_end_max) + 2, 25)  # allow up to hour 25 (01:00 next day)
 
-    all_workers = sorted([w for w in timed_g["עובד"].unique() if "❌" not in str(w)])
+    all_workers = sorted([w for w in timed_g["עובד"].unique() if "❌" not in str(w) and str(w).strip() not in ("", "nan")])
 
     workers_data = []
     for worker in all_workers:
@@ -1363,13 +1363,19 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
                 "orig_start": str(task.get("התחלה", "")),
                 "orig_end":   str(task.get("סיום",   "")),
             })
-        # shift hours from live_employees
-        _emp_row = live_schedule[live_schedule["עובד"] == worker]
+        # shift hours from employees_snap
         _shift_s, _shift_e = "", ""
-        if not _emp_row.empty:
-            _first = _emp_row.iloc[0]
-            _shift_s = str(_first.get("תחילת משמרת", "")).strip()
-            _shift_e = str(_first.get("סוף משמרת",   "")).strip()
+        _emp_snap = st.session_state.get("employees_snap")
+        if _emp_snap is not None and "שם" in _emp_snap.columns:
+            _er = _emp_snap[_emp_snap["שם"] == worker]
+            if not _er.empty:
+                _shift_s = str(_er.iloc[0].get("תחילת משמרת", "")).strip()
+                _shift_e = str(_er.iloc[0].get("סוף משמרת",   "")).strip()
+        if not _shift_s:
+            # fallback: first task start/end
+            if tlist:
+                _shift_s = tlist[0]["start"]
+                _shift_e = tlist[-1]["end"]
         workers_data.append({"name": worker, "tasks": tlist, "shift_start": _shift_s, "shift_end": _shift_e})
 
     gdata    = _json.dumps(workers_data,  ensure_ascii=False)
@@ -1519,7 +1525,7 @@ const ROLE_ABBR={{
 const WORKERS={gdata};
 const RCOLORS={rcolors};
 const DAY_MIN={g_min},DAY_MAX={g_max},HOURS=DAY_MAX-DAY_MIN;
-const HPX=90,LW=140;
+const HPX=72,LW=140;
 const TOTAL_W=LW+HOURS*HPX+20;
 
 function h2px(s){{
@@ -1549,7 +1555,7 @@ WORKERS.forEach(w=>{{
 }});
 
 const inner=document.getElementById("inner");
-inner.style.cssText=`position:relative;min-width:${{TOTAL_W}}px;`;
+inner.style.cssText=`position:relative;width:${{TOTAL_W}}px;min-width:${{TOTAL_W}}px;`;
 
 // ─── Header row with hour labels ──
 const hdrRow=document.createElement("div");
