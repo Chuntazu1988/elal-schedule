@@ -1564,7 +1564,7 @@ hdrLbl.className="hdr-lbl";
 hdrRow.appendChild(hdrLbl);
 const hdrHrs=document.createElement("div");
 hdrHrs.className="hdr-hours";
-hdrHrs.style.width=`${{HOURS*HPX+20}}px`;
+hdrHrs.style.width=`${{HOURS*HPX+80}}px`;
 for(let h=0;h<=HOURS;h++){{
   const tick=document.createElement("div");
   tick.className="h-tick";
@@ -1660,7 +1660,7 @@ WORKERS.forEach(w=>{{
   // Timeline
   const tl=document.createElement("div");
   tl.className="timeline";
-  tl.style.width=(HOURS*HPX+20)+"px";
+  tl.style.width=(HOURS*HPX+80)+"px";
 
   // Vertical grid lines
   for(let h=0;h<=HOURS;h++){{
@@ -1717,7 +1717,10 @@ WORKERS.forEach(w=>{{
         const targetRow=target.closest(".wrow");
         if(targetRow&&targetRow.dataset.worker!==w.name){{
           const encoded=dragInfo.idx+":"+encodeURIComponent(targetRow.dataset.worker);
-          window.parent.location.href=window.parent.location.href.split("?")[0]+"?gantt_swap="+encoded;
+          if(window.opener && !window.opener.closed){{
+            window.opener.location.href=window.opener.location.href.split("?")[0]+"?gantt_swap="+encoded;
+            window.close();
+          }}
         }}
       }}
       dragInfo=null;
@@ -1740,7 +1743,13 @@ WORKERS.forEach(w=>{{
     row.classList.remove("drag-over");
     if(dragInfo&&dragInfo.worker!==w.name){{
       const encoded=dragInfo.idx+":"+encodeURIComponent(w.name);
-      window.parent.location.href=window.parent.location.href.split("?")[0]+"?gantt_swap="+encoded;
+      if(window.opener && !window.opener.closed){{
+        const base=window.opener.location.href.split("?")[0];
+        window.opener.location.href=base+"?gantt_swap="+encoded;
+        window.close();
+      }} else {{
+        alert("⚠️ חזור לטאב הראשי כדי לבצע את החלפת העובד.");
+      }}
     }}
   }});
 
