@@ -1531,9 +1531,8 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
 <title>גאנט עובדים</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-html,body{{background:#04080f;color:#c8d8ec;
-  font-family:"Segoe UI",Arial,sans-serif;margin:0;padding:0;}}
-body{{display:flex;flex-direction:column;min-height:100vh;}}
+html,body{{height:100%;background:#04080f;color:#c8d8ec;
+  font-family:"Segoe UI",Arial,sans-serif;overflow:hidden;display:flex;flex-direction:column}}
 /* ── top bar ── */
 #bar{{flex-shrink:0;display:flex;align-items:center;gap:8px;padding:5px 10px;
   background:#060e1c;border-bottom:1px solid #0d3050;direction:ltr}}
@@ -1542,7 +1541,7 @@ body{{display:flex;flex-direction:column;min-height:100vh;}}
 .nav-btn:active{{opacity:.7}}
 #time-lbl{{font-size:12px;color:#64748b;min-width:110px;text-align:center}}
 /* ── scroll container ── */
-#outer{{flex:1;overflow:auto;min-height:200px}}
+#outer{{flex:1;overflow:auto;min-height:0}}
 /* ── sticky header row ── */
 .hdr{{display:flex;position:sticky;top:0;z-index:20;
   background:#060e1c;border-bottom:2px solid #0d3050}}
@@ -1593,8 +1592,11 @@ body{{display:flex;flex-direction:column;min-height:100vh;}}
 <div id="pop"></div>
 <div id="outer"><div id="inner"></div></div>
 <div id="tray"><div id="tray-inner"></div></div>
+<script type="application/json" id="d-w">{gdata}</script>
+<script type="application/json" id="d-m">{mdata}</script>
 <script>
-const W={gdata}, MISS={mdata};
+const W=JSON.parse(document.getElementById("d-w").textContent);
+const MISS=JSON.parse(document.getElementById("d-m").textContent);
 const G_MIN={g_min}, G_MAX={g_max};
 const ST_BASE="{_st_base}";
 const LW=110, HPX=42;
@@ -1870,7 +1872,7 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
         if "❌" not in str(w) and str(w).strip() not in ("","nan")
     ))
     _h = max(700, _n_workers * 22 + 120)
-    _components.html(_html, height=_h, scrolling=True)
+    _components.html(_html, height=_h, scrolling=False)
     st.stop()
 
 
