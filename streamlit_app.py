@@ -1503,7 +1503,7 @@ html,body{{height:100%;background:#04080f;color:#c8d8ec;
   position:sticky;left:0;background:#04080f;border-right:1px solid #0d3050;
   cursor:pointer;z-index:5;direction:ltr;}}
 .wrow:nth-child(even) .wlabel{{background:#04080f}}
-.tl{{position:relative;flex:1}}
+.tl{{position:relative;flex:1;overflow:visible}}
 .vline{{position:absolute;top:0;bottom:0;border-left:1px solid rgba(13,48,80,.5);pointer-events:none}}
 /* ── tasks ── */
 .task{{position:absolute;top:2px;height:16px;border-radius:4px;
@@ -1565,7 +1565,7 @@ let dragInfo=null;
 
 function render(){{
   updateBar();
-  const TOTAL=LW+VIEW*HPX+80;
+  const TOTAL=LW+VIEW*HPX+200;
   const el=document.getElementById("inner");
   el.innerHTML="";
   el.style.cssText=`position:relative;width:${{TOTAL}}px;min-width:${{TOTAL}}px`;
@@ -1574,7 +1574,7 @@ function render(){{
   const hdr=document.createElement("div");hdr.className="hdr";
   const hl=document.createElement("div");hl.className="hdr-lbl";hdr.appendChild(hl);
   const ht=document.createElement("div");ht.className="hdr-time";
-  ht.style.width=(VIEW*HPX+80)+"px";
+  ht.style.width=(VIEW*HPX+200)+"px";
   for(let h=0;h<=VIEW;h++){{
     const absH=viewStart+h;
     const t=document.createElement("div");t.className="tick";
@@ -1620,7 +1620,7 @@ function render(){{
 
     // timeline
     const tl=document.createElement("div");tl.className="tl";
-    tl.style.width=(VIEW*HPX+80)+"px";
+    tl.style.width=(VIEW*HPX+200)+"px";
     for(let h=0;h<=VIEW;h++){{
       const v=document.createElement("div");v.className="vline";
       const absH2=viewStart+h;
