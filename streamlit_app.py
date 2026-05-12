@@ -1855,11 +1855,14 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
 
     _sched = st.session_state["schedule_df"]
     _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
+
+    # debug: show column info
+    _dbg_workers = [str(w) for w in _sched["עובד"].dropna().unique() if "❌" not in str(w) and str(w).strip() not in ("","nan")]
+    _dbg_timed   = _sched[_sched["התחלה"].astype(str).str.strip() != ""]
+    st.caption(f"🔍 debug: {len(_sched)} rows | {len(_dbg_timed)} timed | {len(_dbg_workers)} workers | cols: {list(_sched.columns[:6])}")
+
     _html  = _render_interactive_gantt(_sched, _sched, missing_df=_miss)
-    _n_workers = len(set(
-        str(w).strip() for w in _sched["עובד"].dropna().unique()
-        if "❌" not in str(w) and str(w).strip() not in ("", "nan")
-    ))
+    _n_workers = len(_dbg_workers)
     _h = max(700, _n_workers * 22 + 120)
     _components.html(_html, height=_h, scrolling=False)
     st.stop()
