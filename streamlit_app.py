@@ -291,16 +291,43 @@ if _lp_action:
 _gantt_swap = st.query_params.get("gantt_swap", "")
 if _gantt_swap:
     del st.query_params["gantt_swap"]
+    _swap_msg = ""
     try:
         import urllib.parse as _uparse
-        _parts     = _gantt_swap.split(":", 1)
-        _task_idx  = int(_parts[0])
-        _new_wrkr  = _uparse.unquote(_parts[1])
-        st.session_state["schedule_df"] = do_swap(
-            st.session_state["schedule_df"], _task_idx, _new_wrkr, "unassign"
-        )
-    except Exception:
-        pass
+        _parts    = _gantt_swap.split(":", 1)
+        _task_idx = int(_parts[0])
+        _new_wrkr = _uparse.unquote(_parts[1])
+        _sdf      = st.session_state.get("schedule_df")
+        _emp_snap = st.session_state.get("employees_snap")
+        if _sdf is not None and _new_wrkr and "❌" not in _new_wrkr:
+            _task_row  = _sdf.loc[_task_idx]
+            _t_start   = str(_task_row.get("התחלה", ""))
+            _t_end     = str(_task_row.get("סיום",   ""))
+            _valid = True
+            if _emp_snap is not None:
+                _flight_num = str(_task_row.get("טיסה", "")).strip()
+                _role_base  = str(_task_row.get("תפקיד בסיס", "")).strip()
+                _candidates = get_qualified_candidates_for_swap(
+                    _sdf, _emp_snap, _flight_num, _role_base, _task_idx
+                )
+                if _new_wrkr not in _candidates:
+                    _valid = False
+                    _swap_msg = f"⚠️ {_new_wrkr} אינו מוסמך / אינו במשמרת / יש חפיפה"
+            if _valid:
+                st.session_state["schedule_df"] = do_swap(_sdf, _task_idx, _new_wrkr, "unassign")
+                _swap_msg = f"✅ שיבוץ עודכן: {_new_wrkr}"
+    except Exception as _e:
+        _swap_msg = f"שגיאה: {_e}"
+    # שלח תוצאה חזרה לגאנט דרך hidden component
+    _ok = "✅" in _swap_msg
+    _components.html(f"""<script>
+if(window.opener && !window.opener.closed){{
+  window.opener.postMessage({{type:"gantt_swap_result",ok:{"true" if _ok else "false"},msg:"{_swap_msg}"}}, "*");
+}}
+localStorage.removeItem("gantt_swap_pending");
+</script>""", height=0)
+    if _swap_msg:
+        st.session_state["_gantt_swap_msg"] = _swap_msg
     st.session_state["show_gantt_page"] = True
     st.rerun()
 
@@ -1332,9 +1359,13 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
 
     all_s = pd.to_datetime(timed_g["התחלה"], format="%H:%M", errors="coerce")
     all_e = pd.to_datetime(timed_g["סיום"],   format="%H:%M", errors="coerce")
-    g_min = max(int(all_s.dt.hour.min()) - 1, 0)
-    _end_max = all_e.dt.hour.max() + (1 if all_e.dt.minute.max() > 0 else 0)
-    g_max = min(int(_end_max) + 2, 25)  # allow up to hour 25 (01:00 next day)
+    # exact range from first to last task, with 0.5h buffer each side
+    _s_min = all_s.dropna()
+    _e_max = all_e.dropna()
+    g_min = max(int(_s_min.dt.hour.min()), 0)
+    _last_h = int(_e_max.dt.hour.max())
+    _last_m = int(_e_max.dt.minute.max())
+    g_max = min(_last_h + (2 if _last_m > 0 else 1), 25)
 
     all_workers = sorted([w for w in timed_g["עובד"].unique() if "❌" not in str(w) and str(w).strip() not in ("", "nan")])
 
@@ -1534,19 +1565,18 @@ body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;d
 <div id="shift-pop" class="hidden"></div>
 <div id="controls" style="
   background:#04080f;padding:8px 14px;
-  display:flex;align-items:center;gap:10px;
+  display:flex;align-items:center;gap:12px;justify-content:center;
   border-bottom:1px solid #0d3050;flex-shrink:0;direction:rtl;
 ">
-  <span style="font-size:12px;color:rgba(0,201,190,.8);font-weight:800;">הצג שעות:</span>
-  <select id="sel-from" style="
-    background:#0d1f30;color:#c8d8ec;border:1px solid #1a3a5a;
-    border-radius:8px;padding:4px 10px;font-size:13px;font-weight:700;cursor:pointer;
-  "></select>
-  <span style="color:#475569;font-size:13px;">—</span>
-  <select id="sel-to" style="
-    background:#0d1f30;color:#c8d8ec;border:1px solid #1a3a5a;
-    border-radius:8px;padding:4px 10px;font-size:13px;font-weight:700;cursor:pointer;
-  "></select>
+  <button id="btn-back" onclick="shiftView(-3)" style="
+    background:#0d1f30;color:#00c9be;border:1px solid rgba(0,201,190,.4);
+    border-radius:10px;padding:6px 18px;font-size:14px;font-weight:900;cursor:pointer;
+  ">‹‹ 3-</button>
+  <span id="time-label" style="font-size:13px;color:#94a3b8;font-weight:700;min-width:110px;text-align:center;"></span>
+  <button id="btn-fwd" onclick="shiftView(3)" style="
+    background:#0d1f30;color:#00c9be;border:1px solid rgba(0,201,190,.4);
+    border-radius:10px;padding:6px 18px;font-size:14px;font-weight:900;cursor:pointer;
+  ">3+ ››</button>
 </div>
 <div id="wrap" style="flex:1;overflow-y:auto;overflow-x:auto;min-height:0;border:1px solid #1a2d42;"><div id="inner"></div></div>
 <div id="tray" style="display:none"><div id="tray-title">✈️ טיסות ללא שיבוץ — גרור לשורת עובד</div><div id="tray-cards"></div></div>
@@ -1565,22 +1595,23 @@ const WORKERS={gdata};
 const RCOLORS={rcolors};
 const DATA_MIN={g_min},DATA_MAX={g_max};
 const LW=140;
-let HPX=55; // fixed — always 55px per hour, user scrolls horizontally
+let HPX=80; // fixed — always 55px per hour, user scrolls horizontally
 
-// ── Populate time selectors ──
-const selFrom=document.getElementById("sel-from");
-const selTo  =document.getElementById("sel-to");
-for(let h=0;h<=25;h++){{
-  const lbl=String(h%24).padStart(2,"0")+":00";
-  const o1=new Option(lbl,h); selFrom.appendChild(o1);
-  const o2=new Option(lbl,h); selTo.appendChild(o2);
+// ── Window view: DATA_MIN → DATA_MAX, shiftable by 3h ──
+const VIEW_HOURS = DATA_MAX - DATA_MIN; // show full data range
+let viewStart = DATA_MIN;              // current window start
+
+function hfmt(h) {{ return String(h%24).padStart(2,"0")+":00"; }}
+
+function shiftView(delta) {{
+  viewStart = Math.max(0, Math.min(viewStart + delta, 25 - VIEW_HOURS));
+  renderGantt();
 }}
-// default: show first 12 hours of data (or all if less)
-// תצוגת 24 שעות: מ-00:00 עד 24:00
-selFrom.value=0;
-selTo.value=24;
-selFrom.addEventListener("change",renderGantt);
-selTo.addEventListener("change",  renderGantt);
+
+function updateLabel() {{
+  const lbl = document.getElementById("time-label");
+  if(lbl) lbl.textContent = hfmt(viewStart) + " – " + hfmt(viewStart + VIEW_HOURS);
+}}
 
 function h2px(s,dayMin){{
   if(!s||s==="nan")return 0;
@@ -1594,10 +1625,11 @@ function t2min(s){{
 }}
 
 function renderGantt(){{
-  const DAY_MIN=parseInt(selFrom.value);
-  const DAY_MAX=parseInt(selTo.value)  >DAY_MIN ? parseInt(selTo.value) : DAY_MIN+1;
-  const HOURS=DAY_MAX-DAY_MIN;
-  HPX=55; // fixed px per hour
+  const DAY_MIN=viewStart;
+  const DAY_MAX=viewStart + VIEW_HOURS;
+  const HOURS=VIEW_HOURS;
+  updateLabel();
+  HPX=80; // fixed px per hour
   const TOTAL_W=LW+HOURS*HPX+40;
   const inner=document.getElementById("inner");
   inner.innerHTML="";
@@ -1810,12 +1842,19 @@ WORKERS.forEach(w=>{{
     row.classList.remove("drag-over");
     if(dragInfo&&dragInfo.worker!==w.name){{
       const encoded=dragInfo.idx+":"+encodeURIComponent(w.name);
+      // שלח דרך localStorage — ללא קפיצה
+      localStorage.setItem("gantt_swap_pending", encoded);
+      localStorage.setItem("gantt_swap_ts", Date.now());
+      // הצג אישור זמני
+      const fb=document.createElement("div");
+      fb.style.cssText="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);"
+        +"background:#0d1f30;color:#00c9be;border:1px solid #00c9be;border-radius:12px;"
+        +"padding:16px 24px;font-size:14px;font-weight:800;z-index:9999;direction:rtl;";
+      fb.textContent="⏳ מעדכן שיבוץ...";
+      document.body.appendChild(fb);
+      setTimeout(()=>fb.remove(), 2000);
       if(window.opener && !window.opener.closed){{
-        const base=window.opener.location.href.split("?")[0];
-        window.opener.location.href=base+"?gantt_swap="+encoded;
-        window.close();
-      }} else {{
-        alert("⚠️ חזור לטאב הראשי כדי לבצע את החלפת העובד.");
+        window.opener.postMessage({{type:"gantt_swap",payload:encoded}}, "*");
       }}
     }}
   }});
@@ -1825,6 +1864,21 @@ WORKERS.forEach(w=>{{
 }});
 }} // end renderGantt
 renderGantt(); // initial render
+
+// ── Listen for postMessage from opener ──
+window.addEventListener("message", function(e) {{
+  if(e.data && e.data.type === "gantt_swap_result") {{
+    const ok = e.data.ok;
+    const msg = e.data.msg || "";
+    const fb = document.createElement("div");
+    fb.style.cssText = "position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);"
+      + "background:#0d1f30;border:1px solid " + (ok?"#00c9be":"#ef4444") + ";border-radius:12px;"
+      + "padding:16px 24px;font-size:14px;font-weight:800;z-index:9999;direction:rtl;color:"+(ok?"#00c9be":"#ef4444")+";";
+    fb.textContent = msg;
+    document.body.appendChild(fb);
+    setTimeout(()=>{{fb.remove();if(ok)renderGantt();}}, 2500);
+  }}
+}});
 
 // ── Tray: unassigned flights ──────────────────────────────────
 if(MISSING && MISSING.length > 0){{
@@ -1871,9 +1925,10 @@ if(MISSING && MISSING.length > 0){{
         const targetRow = target.closest(".wrow");
         if(targetRow) {{
           const encoded = dragInfo.idx + ":" + encodeURIComponent(targetRow.dataset.worker);
+          localStorage.setItem("gantt_swap_pending", encoded);
+          localStorage.setItem("gantt_swap_ts", Date.now());
           if(window.opener && !window.opener.closed) {{
-            window.opener.location.href = window.opener.location.href.split("?")[0] + "?gantt_swap=" + encoded;
-            window.close();
+            window.opener.postMessage({{type:"gantt_swap",payload:encoded}}, "*");
           }}
         }}
       }}
