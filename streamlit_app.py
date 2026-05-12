@@ -1515,8 +1515,8 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
                 "color": "#374151", "abbr": ROLE_ABBR.get(role, role[:4]),
             })
 
-    gdata = _j.dumps(workers_data, ensure_ascii=True)
-    mdata = _j.dumps(missing_data, ensure_ascii=True)
+    gdata = _j.dumps(workers_data, ensure_ascii=False)
+    mdata = _j.dumps(missing_data, ensure_ascii=False)
 
     # ── Streamlit base URL for swap navigation ──
     try:
@@ -1864,17 +1864,24 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
     _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
 
     _html  = _render_interactive_gantt(_sched, _sched, missing_df=_miss)
-    # Open in new window via data URI (avoids blob URL security issues)
     import base64 as _b64g
     _enc = _b64g.b64encode(_html.encode("utf-8")).decode("ascii")
     _components.html(
         f'''<script>
-var s=atob("{_enc}");
-var b=new Uint8Array(s.length);
-for(var i=0;i<s.length;i++)b[i]=s.charCodeAt(i);
-var u=URL.createObjectURL(new Blob([b],{{type:"text/html;charset=utf-8"}}));
-var w=window.open(u,"_gantt","noopener=0");
-if(!w){{document.body.innerHTML='<div style="color:#ef4444;padding:20px;font-size:16px">חסום popup! אפשר pop-ups ונסה שוב.</div>';}}
+(function(){{
+  var s=atob("{_enc}");
+  var b=new Uint8Array(s.length);
+  for(var i=0;i<s.length;i++)b[i]=s.charCodeAt(i);
+  var u=URL.createObjectURL(new Blob([b],{{type:"text/html;charset=utf-8"}}));
+  var w=window.open(u,"_gantt");
+  if(!w){{
+    // fallback: render inline
+    var f=document.createElement("iframe");
+    f.srcdoc=atob("{_enc}");
+    f.style.cssText="position:fixed;top:0;left:0;width:100vw;height:100vh;border:none;z-index:9999;";
+    document.body.appendChild(f);
+  }}
+}})();
 </script>''',
         height=0
     )
