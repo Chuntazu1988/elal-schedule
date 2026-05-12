@@ -1367,23 +1367,19 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
     _last_m = int(_e_max.dt.minute.max())
     g_max = min(_last_h + (2 if _last_m > 0 else 1), 25)
 
-    # כל עובדים פעילים: מהסידור + מקובץ עובדים
+    # עובדים: רק מהסידור היומי (timed_g) — אלה שמשובצים לטיסות
+    # כולל גם עובדים שנמצאים ב-employees_snap עם משמרת פעילה
     _workers_with_tasks = set(
-        w for w in timed_g["עובד"].unique()
+        w for w in live_schedule["עובד"].unique()
         if "❌" not in str(w) and str(w).strip() not in ("", "nan")
     )
     _emp_snap2 = st.session_state.get("employees_snap")
     _all_active = set(_workers_with_tasks)
     if _emp_snap2 is not None and "שם" in _emp_snap2.columns:
-        # הוסף עובדים פעילים שיש להם משמרת (לא רק מהסידור)
-        _active_col = [c for c in ["סטטוס","פעיל","active","status"] if c in _emp_snap2.columns]
-        if _active_col:
-            _emp_active = _emp_snap2[_emp_snap2[_active_col[0]].astype(str).str.strip().isin(["פעיל","כן","active","yes","1","True"])]
-        else:
-            _emp_active = _emp_snap2  # אם אין עמודת סטטוס — כולם פעילים
-        for _n in _emp_active["שם"].tolist():
-            if str(_n).strip() and str(_n).strip() != "nan":
-                _all_active.add(str(_n).strip())
+        for _n in _emp_snap2["שם"].dropna().tolist():
+            _ns = str(_n).strip()
+            if _ns and _ns != "nan":
+                _all_active.add(_ns)
     all_workers = sorted(list(_all_active))
 
     workers_data = []
@@ -1426,7 +1422,7 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
                 _shift_e = tlist[-1]["end"]
         workers_data.append({"name": worker, "tasks": tlist, "shift_start": _shift_s, "shift_end": _shift_e})
 
-    # ── סדר כרונולוגי: משמרות 21:00-23:59 ראשונות, אחר כך לפי שעת סיום ──
+    # ── סדר: 21:00-23:59 קודם (יום קודם), אחר כך לפי שעת התחלה, שעת סיום, א-ב ──
     def _sort_key(w):
         def _hm(s):
             try:
@@ -1436,10 +1432,13 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
                 return 9999
         ss = _hm(w.get("shift_start",""))
         se = _hm(w.get("shift_end",""))
-        if ss >= 21*60:          # משמרת ערב/לילה של היום הקודם
-            return (0, ss, se)
-        else:                    # משמרות היום — לפי שעת סיום
-            return (1, se, ss)
+        name = w.get("name","")
+        if ss >= 21*60:
+            # משמרת ערב/לילה — מיום קודם, קודם כל לפי שעת התחלה
+            return (0, ss, se, name)
+        else:
+            # משמרות היום — לפי שעת התחלה, שעת סיום, א-ב
+            return (1, ss, se, name)
     workers_data.sort(key=_sort_key)
 
     gdata    = _json.dumps(workers_data,  ensure_ascii=False)
@@ -1650,7 +1649,7 @@ function renderGantt(){{
   const TOTAL_W=LW+HOURS*HPX+40;
   const inner=document.getElementById("inner");
   inner.innerHTML="";
-  inner.style.cssText=`position:relative;width:${{TOTAL_W}}px;min-width:${{TOTAL_W}}px;`;
+  inner.style.cssText=`position:relative;width:${{TOTAL_W+80}}px;min-width:${{TOTAL_W+80}}px;`;
   // current time for departed detection
   const _now=new Date();
   const _nowMin=_now.getHours()*60+_now.getMinutes();
@@ -1817,15 +1816,33 @@ WORKERS.forEach(w=>{{
     }});
     d.addEventListener("dragend",()=>{{ d.style.opacity="1"; dragInfo=null; }});
 
-    // ── Touch drag (mobile) ──
+    // ── Touch drag (mobile) — only swap after real movement (>12px) ──
     d.addEventListener("touchstart",e=>{{
-      dragInfo={{idx:t.idx,worker:w.name,role:t.role}};
-      d.style.opacity="0.6";
+      const t0=e.touches[0];
+      d._touchStartX=t0.clientX; d._touchStartY=t0.clientY;
+      d._touchMoved=false;
       d._touchActive=true;
+    }},{{passive:true}});
+    d.addEventListener("touchmove",e=>{{
+      if(!d._touchActive)return;
+      const t0=e.touches[0];
+      const dx=Math.abs(t0.clientX-d._touchStartX);
+      const dy=Math.abs(t0.clientY-d._touchStartY);
+      if(dx>12||dy>12){{
+        if(!d._touchMoved){{
+          d._touchMoved=true;
+          dragInfo={{idx:t.idx,worker:w.name,role:t.role}};
+          d.style.opacity="0.55";
+          document.querySelectorAll(".wrow").forEach(r=>r.classList.remove("drag-over"));
+        }}
+        const el=document.elementFromPoint(t0.clientX,t0.clientY);
+        if(el){{ const row2=el.closest(".wrow"); if(row2)row2.classList.add("drag-over"); }}
+      }}
     }},{{passive:true}});
     d.addEventListener("touchend",e=>{{
       d.style.opacity="1";
-      if(!d._touchActive||!dragInfo)return;
+      document.querySelectorAll(".wrow").forEach(r=>r.classList.remove("drag-over"));
+      if(!d._touchMoved||!dragInfo){{ d._touchActive=false; dragInfo=null; return; }}
       d._touchActive=false;
       const touch=e.changedTouches[0];
       const target=document.elementFromPoint(touch.clientX,touch.clientY);
@@ -1833,10 +1850,9 @@ WORKERS.forEach(w=>{{
         const targetRow=target.closest(".wrow");
         if(targetRow&&targetRow.dataset.worker!==w.name){{
           const encoded=dragInfo.idx+":"+encodeURIComponent(targetRow.dataset.worker);
-          if(window.opener && !window.opener.closed){{
-            window.opener.location.href=window.opener.location.href.split("?")[0]+"?gantt_swap="+encoded;
-            window.close();
-          }}
+          localStorage.setItem("gantt_swap_pending",encoded);
+          if(window.opener&&!window.opener.closed)
+            window.opener.postMessage({{type:"gantt_swap",payload:encoded}},"*");
         }}
       }}
       dragInfo=null;
