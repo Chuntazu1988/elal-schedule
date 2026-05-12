@@ -314,14 +314,47 @@ if _gantt_swap:
                     _valid = False
                     _swap_msg = f"⚠️ {_new_wrkr} אינו מוסמך / אינו במשמרת / יש חפיפה"
             if _valid:
+                # ── בדיקת רווח גדול בין משימות ──
+                def _hm2m(s):
+                    try: p=str(s).split(":"); return int(p[0])*60+int(p[1])
+                    except: return -1
+                _new_tasks = _sdf[_sdf["עובד"].astype(str) == _new_wrkr].copy()
+                _new_end   = _hm2m(_t_end)
+                _new_start = _hm2m(_t_start)
+                _gap_warn  = ""
+                for _, _nt in _new_tasks.iterrows():
+                    _nt_s = _hm2m(str(_nt.get("התחלה","")))
+                    _nt_e = _hm2m(str(_nt.get("סיום","")))
+                    if _nt_s > 0 and _new_end > 0 and _nt_s > _new_end:
+                        _gap = _nt_s - _new_end
+                        if _gap > 30:  # רווח > 30 דקות
+                            _gap_warn = f"⚠️ רווח של {_gap} דק׳ בין המשימות של {_new_wrkr}"
+                    if _nt_e > 0 and _new_start > 0 and _new_start > _nt_e:
+                        _gap = _new_start - _nt_e
+                        if _gap > 30:
+                            _gap_warn = f"⚠️ רווח של {_gap} דק׳ בין המשימות של {_new_wrkr}"
                 st.session_state["schedule_df"] = do_swap(_sdf, _task_idx, _new_wrkr, "unassign")
-                _swap_msg = f"✅ שיבוץ עודכן: {_new_wrkr}"
+                _swap_msg = (f"✅ שיבוץ עודכן: {_new_wrkr}" +
+                             (f" | {_gap_warn}" if _gap_warn else ""))
     except Exception as _e:
         _swap_msg = f"שגיאה: {_e}"
 
+    _is_ok   = "✅" in _swap_msg
+    _color   = "#00c9be" if _is_ok else "#ef4444"
     if _swap_msg:
         st.session_state["_gantt_swap_msg"] = _swap_msg
-    # ← לא פותחים גאנט מחדש, רק שומרים את השיבוץ
+    # שלח הודעה חזרה לטאב הגאנט (אם פתוח)
+    _components.html(f"""<script>
+(function(){{
+  // find gantt tab via window name
+  try {{
+    var g=window.open("","_gantt");
+    if(g&&!g.closed){{
+      g.showSwapMsg("{_swap_msg.replace('"','')}", "{_color}");
+    }}
+  }} catch(e){{}}
+}})();
+</script>""", height=0)
     st.rerun()
 
 daily_file     = sidebar_daily or st.session_state.get("daily_file_obj")
@@ -1351,12 +1384,14 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
     all_s = pd.to_datetime(timed["התחלה"], format="%H:%M", errors="coerce").dropna()
     all_e = pd.to_datetime(timed["סיום"],   format="%H:%M", errors="coerce").dropna()
     g_min = 0  # always start from 00:00
-    # extend to last actual flight end + 1h, up to hour 30 (covers overnight to 06:00)
+    # g_max: ceiling of latest actual end time + 1h buffer
     if not all_e.empty:
-        _last_h = int(all_e.dt.hour.max())
-        _last_m = int(all_e.dt.minute.max())
-        g_max = _last_h + (1 if _last_m == 0 else 2)
-        g_max = min(g_max, 30)  # max 30h (covers midnight+6h)
+        _end_mins = all_e.dt.hour * 60 + all_e.dt.minute
+        _last_total = int(_end_mins.max())          # e.g. 22*60+45 = 1365
+        _last_h = _last_total // 60
+        _last_m = _last_total % 60
+        g_max = _last_h + (1 if _last_m == 0 else 2)  # ceiling + 1h buffer
+        g_max = min(g_max, 30)
     else:
         g_max = 24
 
@@ -1570,7 +1605,8 @@ function render(){{
     }}
     w.tasks.forEach(t=>{{
       const x1=h2x(t.start),x2=h2x(t.end);
-      if(x2<=0||x1>VIEW*HPX+80)return; // outside view
+      // only hide if completely outside view (don't clip partial tasks)
+      if(x2<0||x1>VIEW*HPX+160)return;
       const bw=Math.max(x2-Math.max(x1,0),6);
       const bx=Math.max(x1,0);
       const d=document.createElement("div");d.className="task";
