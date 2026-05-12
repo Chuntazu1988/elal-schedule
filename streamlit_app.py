@@ -1827,6 +1827,11 @@ if(MISS.length){{
 }}
 document.addEventListener("click",()=>document.getElementById("pop").style.display="none");
 render();
+// debug overlay — remove after fix
+const dbg=document.createElement("div");
+dbg.style.cssText="position:fixed;bottom:60px;left:4px;background:rgba(0,0,0,.8);color:#00c9be;font-size:10px;padding:4px 8px;border-radius:6px;z-index:9999;direction:ltr;";
+dbg.textContent="W:"+W.length+" MISS:"+MISS.length+" G:"+G_MIN+"-"+G_MAX+" VIEW:"+VIEW;
+document.body.appendChild(dbg);
 </script></body></html>"""
 
     return html
@@ -1850,16 +1855,13 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
 
     _sched = st.session_state["schedule_df"]
     _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
-    import base64 as _b64g
-    _html = _render_interactive_gantt(_sched, _sched, missing_df=_miss)
-    _enc  = _b64g.b64encode(_html.encode("utf-8")).decode("ascii")
-    _components.html(f"""<script>
-var b=atob("{_enc}");
-var by=new Uint8Array(b.length);
-for(var i=0;i<b.length;i++)by[i]=b.charCodeAt(i);
-var url=URL.createObjectURL(new Blob([by],{{type:"text/html;charset=utf-8"}}));
-window.open(url,"_gantt");
-</script>""", height=0)
+    _html  = _render_interactive_gantt(_sched, _sched, missing_df=_miss)
+    _n_workers = len(set(
+        str(w).strip() for w in _sched["עובד"].dropna().unique()
+        if "❌" not in str(w) and str(w).strip() not in ("", "nan")
+    ))
+    _h = max(700, _n_workers * 22 + 120)
+    _components.html(_html, height=_h, scrolling=False)
     st.stop()
 
 
@@ -1997,14 +1999,8 @@ if "schedule_df" in st.session_state:
             _sched = st.session_state["schedule_df"]
             _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
             if st.button("📅 פתח גאנט", use_container_width=True, key="open_gantt_tab_btn"):
-                import base64 as _b64g2
-                _html2 = _render_interactive_gantt(live_schedule, _sched, missing_df=missing)
-                _enc2  = _b64g2.b64encode(_html2.encode("utf-8")).decode("ascii")
-                _components.html(f"""<script>
-var b=atob("{_enc2}");var by=new Uint8Array(b.length);
-for(var i=0;i<b.length;i++)by[i]=b.charCodeAt(i);
-window.open(URL.createObjectURL(new Blob([by],{{type:"text/html;charset=utf-8"}})),"_gantt");
-</script>""", height=0)
+                st.session_state["show_gantt_page"] = True
+                st.rerun()
             st.stop()
 
         (tab_schedule, tab_gantt, tab_missing, tab_available,
@@ -2047,14 +2043,8 @@ window.open(URL.createObjectURL(new Blob([by],{{type:"text/html;charset=utf-8"}}
             _sched = st.session_state["schedule_df"]
             _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
             if st.button("📅 פתח גאנט", use_container_width=True, key="open_gantt_tab_btn"):
-                import base64 as _b64g2
-                _html2 = _render_interactive_gantt(live_schedule, _sched, missing_df=missing)
-                _enc2  = _b64g2.b64encode(_html2.encode("utf-8")).decode("ascii")
-                _components.html(f"""<script>
-var b=atob("{_enc2}");var by=new Uint8Array(b.length);
-for(var i=0;i<b.length;i++)by[i]=b.charCodeAt(i);
-window.open(URL.createObjectURL(new Blob([by],{{type:"text/html;charset=utf-8"}})),"_gantt");
-</script>""", height=0)
+                st.session_state["show_gantt_page"] = True
+                st.rerun()
 
         # ── Tab: פנויים באולם ─────────────────────────────────────────────────
         with tab_available:
