@@ -1392,8 +1392,9 @@ if "_fids_combined_raw" in st.session_state:
 
 
 def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
-    """בונה HTML מלא לגאנט ומחזיר אותו — נפתח ב-blob URL בטאב חדש."""
-    import json as _j
+    """גאנט יציב: מצייר את כל השורות והפסים ב-Python, עם טיפול בטיסות אחרי חצות."""
+    import html as _html_lib
+    import math as _math
 
     ROLE_COLORS = {
         "ראש צוות": "#8e24aa", "דיילת": "#1d6fa8", "דייל": "#1d6fa8",
@@ -1406,445 +1407,185 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
         "שומר TSA": "שומר", 'טרייני ר"צ': "טרייני", "טרייני רצ": "טרייני",
     }
 
-    timed = live_schedule[live_schedule["התחלה"].astype(str).str.strip() != ""].copy()
+    def esc(x):
+        return _html_lib.escape(str(x))
 
-    # ── guard: if no timed data, show diagnostic ──
-    if timed.empty:
-        _cols = list(live_schedule.columns[:10])
-        _rows = len(live_schedule)
-        return f"""<!DOCTYPE html><html><body style="background:#04080f;color:#c8d8ec;
-          font-family:monospace;padding:20px;direction:ltr;">
-          <h2 style="color:#ef4444">אין נתוני זמן בגאנט</h2>
-          <p>שורות בסידור: {_rows}</p>
-          <p>עמודות: {_cols}</p>
-          <p>בדוק שעמודת "התחלה" קיימת ומכילה שעות</p>
-          </body></html>"""
-
-    # ── time range ──
-    def _hm_to_min(s):
+    def hm_to_min(value):
         try:
-            p = str(s).strip().split(":")
-            return int(p[0]) * 60 + int(p[1])
+            txt = str(value).strip()
+            if not txt or txt.lower() == "nan" or ":" not in txt:
+                return None
+            h, m = txt.split(":")[:2]
+            return int(float(h)) * 60 + int(float(m))
         except Exception:
-            return -1
+            return None
 
-    g_min = 0
-    g_max = 26  # default
+    if "התחלה" not in live_schedule.columns or "עובד" not in live_schedule.columns:
+        return """<!doctype html><html><body style='background:#04080f;color:#ff6b6b;padding:20px;font-family:Arial;direction:rtl'>
+        <h3>חסרות עמודות לגאנט</h3><p>צריך עמודות בשם עובד והתחלה.</p></body></html>"""
 
-    if not timed.empty:
-        _max_end = 0
-        for _, _row in timed.iterrows():
-            _sm = _hm_to_min(str(_row.get("התחלה", "")))
-            _em = _hm_to_min(str(_row.get("סיום", "")))
-            if _sm < 0 or _em < 0:
-                continue
-            # overnight: end < start and start is evening
-            if _em < _sm and _sm > 12 * 60:
-                _em += 24 * 60
-            if _em > _max_end:
-                _max_end = _em
-        if _max_end > 0:
-            _last_h = _max_end // 60
-            _last_m = _max_end % 60
-            g_max = _last_h + (1 if _last_m == 0 else 2)
-            g_max = min(g_max, 30)
+    timed = live_schedule[live_schedule["התחלה"].astype(str).str.strip().ne("")].copy()
+    if timed.empty:
+        return """<!doctype html><html><body style='background:#04080f;color:#ff6b6b;padding:20px;font-family:Arial;direction:rtl'>
+        <h3>אין נתוני זמן לגאנט</h3><p>עמודת התחלה ריקה, לכן אין מה לצייר.</p></body></html>"""
 
-    # ── workers: from rows that HAVE time data (timed) ──
-    # Also include workers from full schedule (counter workers without flights)
-    daily_workers = set()
-    for _col_src in [timed, live_schedule]:
-        if "עובד" in _col_src.columns:
-            for _w in _col_src["עובד"].dropna().unique():
-                _ws = str(_w).strip()
-                if "❌" not in _ws and _ws not in ("", "nan"):
-                    daily_workers.add(_ws)
+    raw_starts = [hm_to_min(v) for v in timed["התחלה"].tolist()]
+    raw_starts = [v for v in raw_starts if v is not None]
+    has_after_midnight = any(v < 6 * 60 for v in raw_starts)
+    night_axis = has_after_midnight
+
+    def norm_start(value):
+        m = hm_to_min(value)
+        if m is None:
+            return None
+        if night_axis and m < 6 * 60:
+            return m + 24 * 60
+        return m
+
+    def norm_end(start_value, end_value):
+        sm = norm_start(start_value)
+        em_raw = hm_to_min(end_value)
+        if sm is None or em_raw is None:
+            return None
+        em = em_raw
+        if night_axis and em < 6 * 60:
+            em += 24 * 60
+        if em <= sm:
+            em += 24 * 60
+        return em
+
+    workers = []
+    seen = set()
+    for w in live_schedule["עובד"].dropna().astype(str):
+        ww = w.strip()
+        if not ww or ww.lower() == "nan" or "❌" in ww or ww in seen:
+            continue
+        seen.add(ww)
+        workers.append(ww)
 
     emp_snap = st.session_state.get("employees_snap")
-
     def shift_minutes(name):
         if emp_snap is not None and "שם" in emp_snap.columns:
-            row = emp_snap[emp_snap["שם"] == name]
+            row = emp_snap[emp_snap["שם"].astype(str).str.strip() == str(name).strip()]
             if not row.empty:
-                def hm(s):
-                    try: p=str(s).split(":"); return int(p[0])*60+int(p[1])
-                    except: return 9999
-                return hm(row.iloc[0].get("תחילת משמרת","")), hm(row.iloc[0].get("סוף משמרת",""))
-        return 9999, 9999
+                ss = hm_to_min(row.iloc[0].get("תחילת משמרת", ""))
+                se = hm_to_min(row.iloc[0].get("סוף משמרת", ""))
+                return ss if ss is not None else 99999, se if se is not None else 99999
+        return 99999, 99999
 
     def sort_key(name):
         ss, se = shift_minutes(name)
-        if ss >= 21*60: return (0, ss, se, name)
+        if ss >= 21 * 60:
+            return (0, ss, se, name)
         return (1, ss, se, name)
+    workers = sorted(workers, key=sort_key)
 
-    workers = sorted(list(daily_workers), key=sort_key)
-
-    # ── build workers_data ──
-    workers_data = []
+    all_ranges = []
+    worker_tasks = {}
     for worker in workers:
-        tasks = timed[timed["עובד"] == worker]
-        tlist = []
-        for ridx, task in tasks.iterrows():
+        rows = timed[timed["עובד"].astype(str).str.strip() == worker]
+        items = []
+        for ridx, task in rows.iterrows():
+            stt = str(task.get("התחלה", "")).strip()
+            enn = str(task.get("סיום", "")).strip()
+            sm = norm_start(stt)
+            em = norm_end(stt, enn)
+            if sm is None or em is None:
+                continue
             role = normalize_role_label(str(task.get("תפקיד בסיס", "")))
-            try:
-                sr = schedule_df.loc[ridx]
-                ts, te = str(sr.get("התחלה", task.get("התחלה",""))), str(sr.get("סיום", task.get("סיום","")))
-            except: ts, te = str(task.get("התחלה","")), str(task.get("סיום",""))
-            tlist.append({
-                "idx": int(ridx),
-                "flight": str(task.get("טיסה","")).replace("LY","").strip(),
-                "role": role, "start": ts, "end": te,
-                "color": ROLE_COLORS.get(role, "#334155"),
-                "abbr": ROLE_ABBR.get(role, role[:4]),
-            })
-        ss, se = shift_minutes(worker)
-        def mtostr(m):
-            if m==9999: return ""
-            return f"{m//60:02d}:{m%60:02d}"
-        workers_data.append({"name": worker, "tasks": tlist,
-                              "shift_start": mtostr(ss), "shift_end": mtostr(se)})
+            flight = str(task.get("טיסה", "")).replace("LY", "").strip()
+            abbr = ROLE_ABBR.get(role, role[:4])
+            color = ROLE_COLORS.get(role, "#334155")
+            items.append({"start": sm, "end": em, "start_txt": stt, "end_txt": enn, "role": role, "flight": flight, "abbr": abbr, "color": color})
+            all_ranges.append((sm, em))
+        worker_tasks[worker] = items
 
-    # missing flights
-    missing_data = []
-    if missing_df is not None and not missing_df.empty:
-        for _, mr in missing_df.iterrows():
-            role = normalize_role_label(str(mr.get("תפקיד בסיס","")))
-            missing_data.append({
-                "idx": int(mr.name),
-                "flight": str(mr.get("טיסה","")).replace("LY","").strip(),
-                "role": role, "start": str(mr.get("התחלה","")), "end": str(mr.get("סיום","")),
-                "color": "#374151", "abbr": ROLE_ABBR.get(role, role[:4]),
-            })
+    if not all_ranges:
+        return """<!doctype html><html><body style='background:#04080f;color:#ff6b6b;padding:20px;font-family:Arial;direction:rtl'>
+        <h3>לא נמצאו משימות עם התחלה וסיום תקינים</h3></body></html>"""
 
-    gdata = _j.dumps(workers_data, ensure_ascii=False)
-    mdata = _j.dumps(missing_data, ensure_ascii=False)
+    min_m = min(s for s, e in all_ranges)
+    max_m = max(e for s, e in all_ranges)
+    g_min_h = max(0, int(_math.floor(min_m / 60)) - 1)
+    g_max_h = min(36, int(_math.ceil(max_m / 60)) + 1)
+    if g_max_h - g_min_h < 8:
+        g_max_h = g_min_h + 8
 
-    # ── Streamlit base URL for swap navigation ──
-    try:
-        _st_host = st.context.headers.get("host", "")
-        _st_base = f"https://{_st_host}" if _st_host else ""
-    except Exception:
-        _st_base = ""
+    HPX = 82
+    LABEL_W = 150
+    ROW_H = 36
+    total_w = LABEL_W + (g_max_h - g_min_h) * HPX + 60
 
-    html = f"""<!DOCTYPE html>
+    def hour_label(h):
+        base = h % 24
+        return f"{base:02d}:00" + (" +1" if h >= 24 else "")
+
+    ticks = []
+    for h in range(g_min_h, g_max_h + 1):
+        x = LABEL_W + (h - g_min_h) * HPX
+        cls = "tick midnight" if h >= 24 and h % 24 == 0 else "tick"
+        ticks.append(f"<div class='{cls}' style='left:{x}px'><span>{hour_label(h)}</span></div>")
+
+    rows_html = []
+    for worker in workers:
+        tasks = worker_tasks.get(worker, [])
+        if not tasks:
+            continue
+        bars = []
+        for t in tasks:
+            left = LABEL_W + ((t["start"] / 60) - g_min_h) * HPX
+            width = max(((t["end"] - t["start"]) / 60) * HPX, 18)
+            plus = " +1" if t["start"] >= 24 * 60 or t["end"] > 24 * 60 else ""
+            label = ("LY" + t["flight"] if t["flight"] else "")
+            if label:
+                label += " · "
+            label += t["abbr"]
+            title = f'{worker} | {t["role"]} | {t["start_txt"]}-{t["end_txt"]}{plus}'
+            bars.append(
+                f"<div class='bar' title='{esc(title)}' style='left:{left:.1f}px;width:{width:.1f}px;background:{t['color']}'>"
+                f"<span>{esc(label)}</span></div>"
+            )
+        rows_html.append(
+            f"<div class='row' style='height:{ROW_H}px;width:{total_w}px'>"
+            f"<div class='name'>{esc(worker)}</div>{''.join(bars)}</div>"
+        )
+
+    rows_joined = ''.join(rows_html)
+    ticks_joined = ''.join(ticks)
+    worker_count = len(rows_html)
+
+    return f"""<!doctype html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>גאנט עובדים</title>
 <style>
-*{{box-sizing:border-box;margin:0;padding:0}}
-html,body{{height:100%;background:#04080f;color:#c8d8ec;
-  font-family:"Segoe UI",Arial,sans-serif;overflow:hidden;display:flex;flex-direction:column}}
-/* ── top bar ── */
-#bar{{flex-shrink:0;display:flex;align-items:center;gap:8px;padding:5px 10px;
-  background:#060e1c;border-bottom:1px solid #0d3050;direction:ltr}}
-.nav-btn{{background:#0d1f30;color:#00c9be;border:1px solid rgba(0,201,190,.35);
-  border-radius:8px;padding:4px 14px;font-size:13px;font-weight:800;cursor:pointer}}
-.nav-btn:active{{opacity:.7}}
-#time-lbl{{font-size:12px;color:#64748b;min-width:110px;text-align:center}}
-/* ── scroll container ── */
-#outer{{flex:1;overflow:auto;min-height:0}}
-/* ── sticky header row ── */
-.hdr{{display:flex;position:sticky;top:0;z-index:20;
-  background:#060e1c;border-bottom:2px solid #0d3050}}
-.hdr-lbl{{width:110px;min-width:110px;flex-shrink:0;
-  position:sticky;left:0;background:#060e1c;z-index:21;
-  border-right:1px solid #0d3050}}
-.hdr-time{{position:relative;height:20px}}
-.tick{{position:absolute;top:0;bottom:0;border-left:1px solid #0d3050;
-  font-size:9px;color:rgba(0,201,190,.65);font-weight:700;
-  padding-left:2px;display:flex;align-items:center;white-space:nowrap;direction:ltr;}}
-/* ── rows ── */
-.wrow{{display:flex;align-items:stretch;min-height:20px;border-bottom:1px solid #0a1628;overflow:visible}}
-.wrow:nth-child(even){{background:rgba(0,30,60,.2)}}
-.wrow.drag-over{{background:rgba(0,201,190,.12)!important;outline:2px dashed rgba(0,201,190,.5)}}
-.wlabel{{width:110px;min-width:110px;flex-shrink:0;font-size:9px;font-weight:700;
-  color:#94a3b8;display:flex;align-items:center;padding:0 6px;
-  position:sticky;left:0;background:#04080f;border-right:1px solid #0d3050;
-  cursor:pointer;z-index:5;direction:ltr;}}
-.wrow:nth-child(even) .wlabel{{background:#04080f}}
-.tl{{position:relative;flex:none;overflow:visible}}
-.vline{{position:absolute;top:0;bottom:0;border-left:1px solid rgba(13,48,80,.5);pointer-events:none}}
-/* ── tasks ── */
-.task{{position:absolute;top:2px;height:16px;border-radius:4px;
-  display:flex;align-items:center;justify-content:center;
-  font-size:8px;font-weight:800;color:rgba(255,255,255,.9);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  padding:0 4px;cursor:grab;border:1px solid transparent}}
-.task.departed{{opacity:.45;filter:saturate(.3)}}
-.task.overlap{{border-color:#ef4444!important}}
-/* ── tray ── */
-#tray{{flex-shrink:0;background:#060e1c;border-top:2px solid #0d3050;
-  padding:6px 10px;max-height:60px;overflow-x:auto;display:none;direction:ltr}}
-#tray-inner{{display:flex;gap:6px;align-items:center}}
-.tc{{background:#1e3a5f;color:#c8d8ec;border-radius:6px;padding:3px 10px;
-  font-size:9px;font-weight:800;cursor:grab;white-space:nowrap;border:1px solid #334}}
-/* ── popup ── */
-#pop{{position:fixed;background:#0d1f30;color:#c8d8ec;
-  border:1px solid rgba(0,201,190,.5);border-radius:8px;
-  padding:8px 12px;font-size:11px;z-index:999;display:none;direction:ltr;text-align:left;
-  box-shadow:0 4px 16px rgba(0,0,0,.5);min-width:130px}}
+*{{box-sizing:border-box}}
+html,body{{margin:0;background:#04080f;color:#c8d8ec;font-family:Arial,"Segoe UI",sans-serif;}}
+.wrap{{height:100vh;overflow:auto;background:#04080f;border-top:1px solid #0d3050;}}
+.canvas{{position:relative;min-width:{total_w}px;width:{total_w}px;padding-top:34px;padding-bottom:40px;}}
+.header{{position:sticky;top:0;height:34px;background:#07111f;border-bottom:2px solid #0d3050;z-index:20;}}
+.corner{{position:sticky;left:0;top:0;width:{LABEL_W}px;height:34px;background:#07111f;border-right:1px solid #0d3050;z-index:25;color:#00c9be;font-weight:900;display:flex;align-items:center;justify-content:center;}}
+.tick{{position:absolute;top:0;height:100%;border-left:1px solid rgba(13,48,80,.8);color:#7dd3fc;font-size:11px;font-weight:800;direction:ltr;}}
+.tick span{{position:absolute;top:9px;left:4px;white-space:nowrap}}
+.midnight{{border-left:2px dashed #f59e0b;color:#f59e0b}}
+.grid{{position:absolute;left:0;right:0;top:34px;bottom:0;pointer-events:none;}}
+.grid .tick{{height:100%;top:0;color:transparent}}
+.row{{position:relative;border-bottom:1px solid #0a1628;background:#04080f;}}
+.row:nth-child(even){{background:#06101d}}
+.name{{position:sticky;left:0;width:{LABEL_W}px;height:100%;background:#07111f;border-right:1px solid #0d3050;color:#e2e8f0;font-size:12px;font-weight:800;display:flex;align-items:center;padding:0 8px;z-index:10;direction:rtl;text-align:right;}}
+.bar{{position:absolute;top:7px;height:22px;border-radius:7px;color:white;font-size:11px;font-weight:900;display:flex;align-items:center;justify-content:center;padding:0 6px;overflow:hidden;white-space:nowrap;box-shadow:0 2px 7px rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.18);direction:ltr;}}
+.bar span{{overflow:hidden;text-overflow:ellipsis}}
+.info{{position:sticky;left:0;bottom:0;width:100%;padding:8px 10px;background:#07111f;border-top:1px solid #0d3050;color:#94a3b8;font-size:12px;direction:rtl}}
 </style></head>
 <body>
-<div id="bar">
-  <button class="nav-btn" onclick="shift(-12)" style="direction:ltr;">◀ -12h</button>
-  <span id="time-lbl" style="direction:ltr;"></span>
-  <button class="nav-btn" onclick="shift(12)" style="direction:ltr;">+12h ▶</button>
+<div class="wrap">
+  <div class="canvas">
+    <div class="header" style="width:{total_w}px"><div class="corner">{worker_count} עובדים</div>{ticks_joined}</div>
+    <div class="grid">{ticks_joined}</div>
+    {rows_joined}
+    <div class="info">ציר זמן: {hour_label(g_min_h)} עד {hour_label(g_max_h)}. טיסות אחרי חצות מוצגות כ־+1.</div>
+  </div>
 </div>
-<div id="pop"></div>
-<div id="outer"><div id="inner"></div></div>
-<div id="tray"><div id="tray-inner"></div></div>
-<script type="application/json" id="d-w">{gdata}</script>
-<script type="application/json" id="d-m">{mdata}</script>
-<script>
-const W=JSON.parse(document.getElementById("d-w").textContent);
-const MISS=JSON.parse(document.getElementById("d-m").textContent);
-const G_MIN={g_min}, G_MAX={g_max};
-const ST_BASE="{_st_base}";
-const LW=110, HPX=42;
-let viewStart=G_MIN;
-const VIEW=Math.max(G_MAX-G_MIN, 26); // min 26h
-
-function pad(h){{return String(h%24).padStart(2,"0")+":00"}}
-function hm2min(s){{
-  if(!s||s==="nan")return-1;
-  const p=s.split(":");return parseInt(p[0]||0)*60+parseInt(p[1]||0);
-}}
-function h2x(s, startS){{
-  // s = time string "HH:MM", startS = task start time (for overnight detection)
-  if(!s||s==="nan")return-1;
-  const p=s.split(":");
-  let h=parseInt(p[0]||0)+parseInt(p[1]||0)/60;
-  // overnight: if end hour < start hour, add 24 (flight crosses midnight)
-  if(startS&&startS!=="nan"){{
-    const sp=startS.split(":");
-    const sh=parseInt(sp[0]||0)+parseInt(sp[1]||0)/60;
-    if(h<sh&&sh>12)h+=24; // only if start is in evening (>12)
-  }}
-  return(h-viewStart)*HPX;
-}}
-function shift(d){{
-  viewStart=Math.max(G_MIN,Math.min(viewStart+d,G_MAX-VIEW));
-  render();
-}}
-function updateBar(){{
-  document.getElementById("time-lbl").textContent=
-    pad(viewStart)+" – "+pad(viewStart+VIEW);
-}}
-const now=new Date();
-const nowMin=now.getHours()*60+now.getMinutes();
-let dragInfo=null;
-
-function render(){{
-  updateBar();
-  const TOTAL=LW+VIEW*HPX+200;
-  const el=document.getElementById("inner");
-  el.innerHTML="";
-  el.style.cssText=`position:relative;width:${{TOTAL}}px;min-width:${{TOTAL}}px`;
-
-  // header
-  const hdr=document.createElement("div");hdr.className="hdr";
-  const hl=document.createElement("div");hl.className="hdr-lbl";hdr.appendChild(hl);
-  const ht=document.createElement("div");ht.className="hdr-time";
-  ht.style.width=(VIEW*HPX+200)+"px";
-  for(let h=0;h<=VIEW;h++){{
-    const absH=viewStart+h;
-    const t=document.createElement("div");t.className="tick";
-    t.style.left=(h*HPX)+"px";
-    const lbl=pad(absH);
-    // midnight crossing: second 00:00 means new day
-    if(absH>=24&&absH%24===0){{
-      t.textContent="00:00 +1";
-      t.style.color="#f59e0b";t.style.fontWeight="900";
-      // add vertical midnight line
-      const ml=document.createElement("div");
-      ml.style.cssText=`position:absolute;left:${{h*HPX}}px;top:0;bottom:0;`
-        +`border-left:2px dashed rgba(245,158,11,.5);pointer-events:none;z-index:1;`;
-      tl_midnight=ml;
-    }} else {{
-      t.textContent=lbl;
-    }}
-    ht.appendChild(t);
-  }}
-  hdr.appendChild(ht);el.appendChild(hdr);
-
-  // rows
-  W.forEach(w=>{{
-    const row=document.createElement("div");row.className="wrow";row.dataset.worker=w.name;
-    // label
-    const lbl=document.createElement("div");lbl.className="wlabel";lbl.textContent=w.name;
-    lbl.addEventListener("click",e=>{{
-      e.stopPropagation();
-      const pop=document.getElementById("pop");
-      pop.innerHTML=`<strong style="color:#00c9be">${{w.name}}</strong><br>`
-        +`<span style="color:#94a3b8">משמרת: </span>`
-        +`<strong>${{w.shift_start||"?"}} – ${{w.shift_end||"?"}}</strong>`;
-      pop.style.display="block";
-      // position ABOVE the label
-      const rect=lbl.getBoundingClientRect();
-      const pw=pop.offsetWidth||140;
-      pop.style.left=Math.max(4,Math.min(rect.left,window.innerWidth-pw-4))+"px";
-      pop.style.top=Math.max(4,rect.top-pop.offsetHeight-6)+"px";
-      clearTimeout(pop._t);pop._t=setTimeout(()=>pop.style.display="none",4000);
-    }});
-    lbl.addEventListener("touchend",e=>{{e.preventDefault();lbl.click()}});
-    row.appendChild(lbl);
-
-    // timeline
-    const tl=document.createElement("div");tl.className="tl";
-    tl.style.width=(VIEW*HPX+200)+"px";
-    for(let h=0;h<=VIEW;h++){{
-      const v=document.createElement("div");v.className="vline";
-      const absH2=viewStart+h;
-      if(absH2>=24&&absH2%24===0){{
-        v.style.cssText=`position:absolute;left:${{h*HPX}}px;top:0;bottom:0;`
-          +`border-left:2px dashed rgba(245,158,11,.4);pointer-events:none;`;
-      }} else {{
-        v.style.left=(h*HPX)+"px";
-      }}
-      tl.appendChild(v);
-    }}
-    w.tasks.forEach(t=>{{
-      const x1=h2x(t.start,null),x2=h2x(t.end,t.start);
-      // only hide if completely outside view (don't clip partial tasks)
-      if(x2<0||x1>VIEW*HPX+160)return;
-      const bw=Math.max(x2-Math.max(x1,0),6);
-      const bx=Math.max(x1,0);
-      const d=document.createElement("div");d.className="task";
-      let endMin=hm2min(t.end);
-      const startMin=hm2min(t.start);
-      // overnight: if end < start and start is evening, add 24h
-      if(endMin>=0&&startMin>12*60&&endMin<startMin)endMin+=24*60;
-      if(endMin>0&&endMin<nowMin)d.classList.add("departed");
-      d.style.cssText=`left:${{bx.toFixed(1)}}px;width:${{bw.toFixed(1)}}px;background:${{t.color}}`;
-      d.textContent=(end>0&&end<nowMin?"✈ ":"")+t.flight+(t.flight?" · ":"")+t.abbr;
-      d.title=`${{w.name}} | ${{t.role}} | ${{t.start}}–${{t.end}}`;
-      d.setAttribute("draggable","true");
-      // short click/tap → task info popup
-      d.addEventListener("click",e=>{{
-        e.stopPropagation();
-        const pop=document.getElementById("pop");
-        const isNext=hm2min(t.end)>0&&(viewStart+hm2min(t.end)/60)>=24;
-        pop.innerHTML=
-          `🕐 <strong style="color:#00c9be">${{t.start}} – ${{t.end}}</strong>`
-          +(isNext?` <span style="color:#f59e0b;font-size:10px;">(+1)</span>`:"");
-        pop.style.display="block";
-        const rect=d.getBoundingClientRect();
-        const pw=Math.max(pop.offsetWidth,150);
-        pop.style.left=Math.max(4,Math.min(rect.left,window.innerWidth-pw-4))+"px";
-        pop.style.top=Math.max(4,rect.top-pop.offsetHeight-6)+"px";
-        clearTimeout(pop._t);pop._t=setTimeout(()=>pop.style.display="none",3000);
-      }});
-      // desktop drag
-      d.addEventListener("dragstart",e=>{{
-        dragInfo={{idx:t.idx,worker:w.name}};
-        e.dataTransfer.setData("text/plain",t.idx);d.style.opacity=".4";
-      }});
-      d.addEventListener("dragend",()=>{{d.style.opacity="1";dragInfo=null}});
-      // touch drag
-      let tx0,ty0,moved=false;
-      d.addEventListener("touchstart",e=>{{
-        tx0=e.touches[0].clientX;ty0=e.touches[0].clientY;moved=false;
-      }},{{passive:true}});
-      d.addEventListener("touchmove",e=>{{
-        const dx=Math.abs(e.touches[0].clientX-tx0),dy=Math.abs(e.touches[0].clientY-ty0);
-        if(dx>10||dy>10){{moved=true;dragInfo={{idx:t.idx,worker:w.name}};d.style.opacity=".4";}}
-        if(moved){{
-          document.querySelectorAll(".wrow").forEach(r=>r.classList.remove("drag-over"));
-          const el2=document.elementFromPoint(e.touches[0].clientX,e.touches[0].clientY);
-          if(el2){{const r2=el2.closest(".wrow");if(r2)r2.classList.add("drag-over");}}
-        }}
-      }},{{passive:true}});
-      d.addEventListener("touchend",e=>{{
-        d.style.opacity="1";document.querySelectorAll(".wrow").forEach(r=>r.classList.remove("drag-over"));
-        if(!moved||!dragInfo){{dragInfo=null;return;}}
-        const touch=e.changedTouches[0];
-        const target=document.elementFromPoint(touch.clientX,touch.clientY);
-        if(target){{const r2=target.closest(".wrow");
-          if(r2&&r2.dataset.worker!==w.name)doSwap(dragInfo.idx,r2.dataset.worker);
-        }}
-        dragInfo=null;
-      }});
-      tl.appendChild(d);
-    }});
-    // drop
-    row.addEventListener("dragover",e=>{{if(dragInfo&&dragInfo.worker!==w.name){{e.preventDefault();row.classList.add("drag-over");}}}});
-    row.addEventListener("dragleave",()=>row.classList.remove("drag-over"));
-    row.addEventListener("drop",e=>{{
-      e.preventDefault();row.classList.remove("drag-over");
-      if(dragInfo&&dragInfo.worker!==w.name)doSwap(dragInfo.idx,w.name);
-      dragInfo=null;
-    }});
-    row.appendChild(tl);el.appendChild(row);
-  }});
-}}
-
-function showSwapMsg(msg,color){{
-  const n=document.createElement("div");
-  n.style.cssText="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);"
-    +"background:#0d1f30;color:"+color+";border:2px solid "+color+";"
-    +"border-radius:12px;padding:14px 24px;font-size:14px;font-weight:800;"
-    +"z-index:9999;direction:ltr;text-align:center;box-shadow:0 6px 20px rgba(0,0,0,.5);";
-  n.textContent=msg;
-  document.body.appendChild(n);
-  setTimeout(()=>n.remove(),3000);
-}}
-
-let _swapBusy=false;
-function doSwap(idx,newWorker){{
-  if(_swapBusy)return;
-  _swapBusy=true;
-  showSwapMsg("⏳ מעדכן שיבוץ...","#00c9be");
-  const encoded=idx+":"+encodeURIComponent(newWorker);
-  // navigate this blob tab to Streamlit with swap param
-  const target = (ST_BASE || (window.opener&&!window.opener.closed
-    ? window.opener.location.href.split("?")[0] : ""));
-  if(target) {{
-    window.location.href = target + "?gantt_swap=" + encoded;
-  }} else {{
-    // fallback: try localStorage bridge
-    try{{ localStorage.setItem("gantt_swap_pending", encoded); }}catch(e){{}}
-    setTimeout(()=>{{ _swapBusy=false; }}, 3000);
-  }}
-}}
-
-// tray
-if(MISS.length){{
-  document.getElementById("tray").style.display="block";
-  MISS.forEach(m=>{{
-    const c=document.createElement("div");c.className="tc";
-    c.textContent=m.flight+(m.flight?" · ":"")+m.abbr+" "+m.start;
-    c.setAttribute("draggable","true");
-    c.addEventListener("dragstart",e=>{{dragInfo={{idx:m.idx,worker:"__missing__"}};c.style.opacity=".4";}});
-    c.addEventListener("dragend",()=>{{c.style.opacity="1";dragInfo=null;}});
-    let tx0,ty0,moved=false;
-    c.addEventListener("touchstart",e=>{{tx0=e.touches[0].clientX;ty0=e.touches[0].clientY;moved=false;}},{{passive:true}});
-    c.addEventListener("touchmove",e=>{{
-      if(Math.abs(e.touches[0].clientX-tx0)>10||Math.abs(e.touches[0].clientY-ty0)>10){{
-        moved=true;dragInfo={{idx:m.idx,worker:"__missing__"}};c.style.opacity=".4";
-      }}
-    }},{{passive:true}});
-    c.addEventListener("touchend",e=>{{
-      c.style.opacity="1";document.querySelectorAll(".wrow").forEach(r=>r.classList.remove("drag-over"));
-      if(!moved||!dragInfo){{dragInfo=null;return;}}
-      const t=e.changedTouches[0];const el2=document.elementFromPoint(t.clientX,t.clientY);
-      if(el2){{const r2=el2.closest(".wrow");if(r2)doSwap(m.idx,r2.dataset.worker);}}
-      dragInfo=null;
-    }});
-    document.getElementById("tray-inner").appendChild(c);
-  }});
-}}
-document.addEventListener("click",()=>document.getElementById("pop").style.display="none");
-try{{
-  render();
-}}catch(err){{
-  const e=document.createElement("div");
-  e.style.cssText="position:fixed;top:50px;left:10px;right:10px;background:#1a0000;color:#ff6b6b;border:2px solid #ff6b6b;border-radius:8px;padding:12px;font-size:11px;z-index:9999;direction:ltr;white-space:pre-wrap;font-family:monospace;";
-  e.textContent="JS ERROR: "+err.message+"\n"+(err.stack||"");
-  document.body.appendChild(e);
-}}
-
-</script></body></html>"""
-
-    return html
+</body></html>"""
 
 
 # ── גאנט: רנדור אחרי הגדרת הפונקציה ──────────────────────────────────────
@@ -1871,8 +1612,8 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
         str(w).strip() for w in _sched["עובד"].dropna().unique()
         if "❌" not in str(w) and str(w).strip() not in ("","nan")
     ))
-    _h = max(700, _n_workers * 22 + 120)
-    _components.html(_html, height=_h, scrolling=False)
+    _h = max(760, _n_workers * 40 + 180)
+    _components.html(_html, height=_h, scrolling=True)
     st.stop()
 
 
@@ -2009,9 +1750,13 @@ if "schedule_df" in st.session_state:
                 )
             _sched = st.session_state["schedule_df"]
             _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
-            if st.button("📅 פתח גאנט", use_container_width=True, key="open_gantt_tab_btn"):
-                st.session_state["show_gantt_page"] = True
-                st.rerun()
+            _html  = _render_interactive_gantt(_sched, _sched, missing_df=_miss)
+            _n_workers = len(set(
+                str(w).strip() for w in _sched["עובד"].dropna().unique()
+                if "❌" not in str(w) and str(w).strip() not in ("", "nan")
+            ))
+            _h = max(760, _n_workers * 40 + 180)
+            _components.html(_html, height=_h, scrolling=True)
             st.stop()
 
         (tab_schedule, tab_gantt, tab_missing, tab_available,
