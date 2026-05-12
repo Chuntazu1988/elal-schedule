@@ -206,6 +206,43 @@ body{font-family:"Inter","Heebo",Arial,sans-serif;background:#04080f;overflow-x:
 # UI
 # =========================
 
+# ── גאנט: בדיקה מוקדמת לפני כל רנדור ──────────────────────────────────────
+_goto_gantt_early = st.session_state.get("show_gantt_page", False)
+if _goto_gantt_early and "schedule_df" in st.session_state:
+    st.session_state.pop("show_gantt_page", None)
+    # הסתר הכל — sidebar, header, footer, padding
+    st.markdown("""<style>
+    section[data-testid="stSidebar"] { display:none !important; }
+    header[data-testid="stHeader"]   { display:none !important; }
+    footer                           { display:none !important; }
+    #MainMenu                        { display:none !important; }
+    [data-testid="stToolbar"]        { display:none !important; }
+    [data-testid="stDecoration"]     { display:none !important; }
+    .stApp                           { background:#04080f !important; }
+    [data-testid="block-container"]  { padding:0 !important; max-width:100% !important; }
+    [data-testid="stMain"]           { padding:0 !important; }
+    </style>""", unsafe_allow_html=True)
+
+    _bc, _tc = st.columns([1, 9])
+    with _bc:
+        if st.button("← חזרה", key="gantt_back_overlay"):
+            st.rerun()
+    with _tc:
+        st.markdown(
+            '<div style="direction:rtl;font-size:18px;font-weight:900;'
+            'color:#00c9be;padding:6px 0;">📅 גאנט עובדים</div>',
+            unsafe_allow_html=True,
+        )
+
+    _sched = st.session_state["schedule_df"]
+    _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
+
+    # Build gantt inline — reuse the function after it's defined
+    # We store params and render after definition
+    st.session_state["_gantt_render_now"] = True
+    st.session_state["_gantt_miss"]       = _miss
+    st.session_state["_gantt_sched"]      = _sched
+
 with st.sidebar:
     st.header("📂 העלאת קבצים")
     sidebar_daily = st.file_uploader("קובץ סידור יומי", type=["xlsx"], key="sidebar_daily")
@@ -1705,29 +1742,12 @@ if(MISSING && MISSING.length > 0){{
 
 
 
-# ── גאנט מלא — מסך נפרד לפני כל UI אחר ─────────────────────────────────────
-if _goto_gantt and "schedule_df" in st.session_state and daily_file and employees_file:
-    st.session_state.pop("show_gantt_page", None)
-    st.markdown("""<style>
-    section[data-testid="stSidebar"],
-    header[data-testid="stHeader"],
-    #MainMenu, footer,
-    [data-testid="stToolbar"],
-    [data-testid="stDecoration"],
-    [data-testid="stStatusWidget"] { display:none !important; }
-    .stApp, [data-testid="stAppViewContainer"],
-    [data-testid="stMain"], [data-testid="block-container"]
-    { padding:0 !important; margin:0 !important; max-width:100% !important; }
-    </style>""", unsafe_allow_html=True)
-    _back_col, _title_col = st.columns([1, 9])
-    with _back_col:
-        if st.button("← חזרה", key="gantt_back_early"):
-            st.rerun()
-    with _title_col:
-        st.markdown('<div style="direction:rtl;font-size:18px;font-weight:900;color:#00c9be;padding:4px 0;">📅 גאנט עובדים</div>', unsafe_allow_html=True)
-    _sched = st.session_state["schedule_df"]
-    _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
-    _render_interactive_gantt(_sched, _sched, missing_df=_miss)
+# ── גאנט: רנדור אחרי הגדרת הפונקציה ──────────────────────────────────────
+if st.session_state.pop("_gantt_render_now", False):
+    _sched = st.session_state.pop("_gantt_sched", None)
+    _miss  = st.session_state.pop("_gantt_miss",  None)
+    if _sched is not None:
+        _render_interactive_gantt(_sched, _sched, missing_df=_miss)
     st.stop()
 
 
