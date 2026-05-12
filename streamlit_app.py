@@ -1367,20 +1367,16 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
     _last_m = int(_e_max.dt.minute.max())
     g_max = min(_last_h + (2 if _last_m > 0 else 1), 25)
 
-    # עובדים: רק מהסידור היומי (timed_g) — אלה שמשובצים לטיסות
-    # כולל גם עובדים שנמצאים ב-employees_snap עם משמרת פעילה
-    _workers_with_tasks = set(
-        w for w in live_schedule["עובד"].unique()
-        if "❌" not in str(w) and str(w).strip() not in ("", "nan")
-    )
-    _emp_snap2 = st.session_state.get("employees_snap")
-    _all_active = set(_workers_with_tasks)
-    if _emp_snap2 is not None and "שם" in _emp_snap2.columns:
-        for _n in _emp_snap2["שם"].dropna().tolist():
-            _ns = str(_n).strip()
-            if _ns and _ns != "nan":
-                _all_active.add(_ns)
-    all_workers = sorted(list(_all_active))
+    # עובדים: אך ורק מהסידור היומי הנוכחי
+    # (העובדים ששובצו לאותו יום — כולל שורות ❌ שמייצגות חוסרים)
+    _daily_workers = set()
+    for _col in ["עובד", "שם"]:
+        if _col in live_schedule.columns:
+            for _w in live_schedule[_col].dropna().unique():
+                _ws = str(_w).strip()
+                if _ws and _ws != "nan" and "❌" not in _ws:
+                    _daily_workers.add(_ws)
+    all_workers = sorted(list(_daily_workers))
 
     workers_data = []
     for worker in all_workers:
