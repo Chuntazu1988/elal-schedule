@@ -321,7 +321,7 @@ if _gantt_swap:
 
     if _swap_msg:
         st.session_state["_gantt_swap_msg"] = _swap_msg
-    st.session_state["show_gantt_page"] = True
+    # ← לא פותחים גאנט מחדש, רק שומרים את השיבוץ
     st.rerun()
 
 daily_file     = sidebar_daily or st.session_state.get("daily_file_obj")
@@ -1350,8 +1350,15 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
     # ── time range ──
     all_s = pd.to_datetime(timed["התחלה"], format="%H:%M", errors="coerce").dropna()
     all_e = pd.to_datetime(timed["סיום"],   format="%H:%M", errors="coerce").dropna()
-    g_min = max(int(all_s.dt.hour.min()), 0) if not all_s.empty else 0
-    g_max = min(int(all_e.dt.hour.max()) + 2, 25) if not all_e.empty else 24
+    g_min = 0  # always start from 00:00
+    # extend to last actual flight end + 1h, up to hour 30 (covers overnight to 06:00)
+    if not all_e.empty:
+        _last_h = int(all_e.dt.hour.max())
+        _last_m = int(all_e.dt.minute.max())
+        g_max = _last_h + (1 if _last_m == 0 else 2)
+        g_max = min(g_max, 30)  # max 30h (covers midnight+6h)
+    else:
+        g_max = 24
 
     # ── workers: from daily schedule only, sorted ──
     daily_workers = set(
@@ -1490,7 +1497,7 @@ const W={gdata}, MISS={mdata};
 const G_MIN={g_min}, G_MAX={g_max};
 const LW=110, HPX=42;
 let viewStart=G_MIN;
-const VIEW=Math.min(24,G_MAX-G_MIN);
+const VIEW=G_MAX-G_MIN; // full range
 
 function pad(h){{return String(h%24).padStart(2,"0")+":00"}}
 function hm2min(s){{
