@@ -1515,8 +1515,8 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
                 "color": "#374151", "abbr": ROLE_ABBR.get(role, role[:4]),
             })
 
-    gdata = _j.dumps(workers_data, ensure_ascii=False)
-    mdata = _j.dumps(missing_data, ensure_ascii=False)
+    gdata = _j.dumps(workers_data, ensure_ascii=True)
+    mdata = _j.dumps(missing_data, ensure_ascii=True)
 
     # ── Streamlit base URL for swap navigation ──
     try:
@@ -1830,7 +1830,14 @@ if(MISS.length){{
   }});
 }}
 document.addEventListener("click",()=>document.getElementById("pop").style.display="none");
-render();
+try{{
+  render();
+}}catch(err){{
+  const e=document.createElement("div");
+  e.style.cssText="position:fixed;top:50px;left:10px;right:10px;background:#1a0000;color:#ff6b6b;border:2px solid #ff6b6b;border-radius:8px;padding:12px;font-size:11px;z-index:9999;direction:ltr;white-space:pre-wrap;font-family:monospace;";
+  e.textContent="JS ERROR: "+err.message+"\n"+(err.stack||"");
+  document.body.appendChild(e);
+}}
 
 </script></body></html>"""
 
@@ -1857,12 +1864,20 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
     _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
 
     _html  = _render_interactive_gantt(_sched, _sched, missing_df=_miss)
-    _n_workers = len(set(
-        str(w).strip() for w in _sched["עובד"].dropna().unique()
-        if "❌" not in str(w) and str(w).strip() not in ("","nan")
-    ))
-    _h = max(700, _n_workers * 22 + 120)
-    _components.html(_html, height=_h, scrolling=False)
+    # Open in new window via data URI (avoids blob URL security issues)
+    import base64 as _b64g
+    _enc = _b64g.b64encode(_html.encode("utf-8")).decode("ascii")
+    _components.html(
+        f'''<script>
+var s=atob("{_enc}");
+var b=new Uint8Array(s.length);
+for(var i=0;i<s.length;i++)b[i]=s.charCodeAt(i);
+var u=URL.createObjectURL(new Blob([b],{{type:"text/html;charset=utf-8"}}));
+var w=window.open(u,"_gantt","noopener=0");
+if(!w){{document.body.innerHTML='<div style="color:#ef4444;padding:20px;font-size:16px">חסום popup! אפשר pop-ups ונסה שוב.</div>';}}
+</script>''',
+        height=0
+    )
     st.stop()
 
 
