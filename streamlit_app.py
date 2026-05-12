@@ -206,11 +206,9 @@ body{font-family:"Inter","Heebo",Arial,sans-serif;background:#04080f;overflow-x:
 # UI
 # =========================
 
-# ── גאנט: בדיקה מוקדמת לפני כל רנדור ──────────────────────────────────────
+# ── גאנט: רק הסתרת UI — הרנדור יקרה לאחר הגדרת הפונקציה ──────────────────
 _goto_gantt_early = st.session_state.get("show_gantt_page", False)
 if _goto_gantt_early and "schedule_df" in st.session_state:
-    st.session_state.pop("show_gantt_page", None)
-    # הסתר הכל — sidebar, header, footer, padding
     st.markdown("""<style>
     section[data-testid="stSidebar"] { display:none !important; }
     header[data-testid="stHeader"]   { display:none !important; }
@@ -222,21 +220,6 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
     [data-testid="block-container"]  { padding:0 !important; max-width:100% !important; }
     [data-testid="stMain"]           { padding:0 !important; }
     </style>""", unsafe_allow_html=True)
-
-    _bc, _tc = st.columns([1, 9])
-    with _bc:
-        if st.button("← חזרה", key="gantt_back_overlay"):
-            st.rerun()
-    with _tc:
-        st.markdown(
-            '<div style="direction:rtl;font-size:18px;font-weight:900;'
-            'color:#00c9be;padding:6px 0;">📅 גאנט עובדים</div>',
-            unsafe_allow_html=True,
-        )
-
-    _sched = st.session_state["schedule_df"]
-    _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
-    _render_interactive_gantt(_sched, _sched, missing_df=_miss)
 
 with st.sidebar:
     st.header("📂 העלאת קבצים")
@@ -1748,6 +1731,26 @@ if(MISSING && MISSING.length > 0){{
 
 
 
+
+
+
+# ── גאנט: רנדור אחרי הגדרת הפונקציה ──────────────────────────────────────
+if _goto_gantt_early and "schedule_df" in st.session_state:
+    st.session_state.pop("show_gantt_page", None)
+    _bc, _tc = st.columns([1, 9])
+    with _bc:
+        if st.button("← חזרה", key="gantt_back_late"):
+            st.rerun()
+    with _tc:
+        st.markdown(
+            '<div style="direction:rtl;font-size:18px;font-weight:900;'
+            'color:#00c9be;padding:6px 0;">📅 גאנט עובדים</div>',
+            unsafe_allow_html=True,
+        )
+    _sched = st.session_state["schedule_df"]
+    _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
+    _render_interactive_gantt(_sched, _sched, missing_df=_miss)
+    st.stop()
 
 
 def recompute_from_schedule(schedule_df, flights_df, employees_df):
