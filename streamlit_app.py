@@ -1515,8 +1515,8 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
                 "color": "#374151", "abbr": ROLE_ABBR.get(role, role[:4]),
             })
 
-    gdata = _j.dumps(workers_data, ensure_ascii=False)
-    mdata = _j.dumps(missing_data, ensure_ascii=False)
+    gdata = _j.dumps(workers_data, ensure_ascii=True)
+    mdata = _j.dumps(missing_data, ensure_ascii=True)
 
     # ── Streamlit base URL for swap navigation ──
     try:
@@ -1864,27 +1864,12 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
     _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
 
     _html  = _render_interactive_gantt(_sched, _sched, missing_df=_miss)
-    import base64 as _b64g
-    _enc = _b64g.b64encode(_html.encode("utf-8")).decode("ascii")
-    _components.html(
-        f'''<script>
-(function(){{
-  var s=atob("{_enc}");
-  var b=new Uint8Array(s.length);
-  for(var i=0;i<s.length;i++)b[i]=s.charCodeAt(i);
-  var u=URL.createObjectURL(new Blob([b],{{type:"text/html;charset=utf-8"}}));
-  var w=window.open(u,"_gantt");
-  if(!w){{
-    // fallback: render inline
-    var f=document.createElement("iframe");
-    f.srcdoc=atob("{_enc}");
-    f.style.cssText="position:fixed;top:0;left:0;width:100vw;height:100vh;border:none;z-index:9999;";
-    document.body.appendChild(f);
-  }}
-}})();
-</script>''',
-        height=0
-    )
+    _n_workers = len(set(
+        str(w).strip() for w in _sched["עובד"].dropna().unique()
+        if "❌" not in str(w) and str(w).strip() not in ("","nan")
+    ))
+    _h = max(700, _n_workers * 22 + 120)
+    _components.html(_html, height=_h, scrolling=False)
     st.stop()
 
 
