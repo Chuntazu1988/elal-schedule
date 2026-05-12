@@ -1484,6 +1484,14 @@ body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;d
 .task:active{{cursor:grabbing;opacity:.75;}}
 .task.etd-changed{{border-color:#f59e0b!important;box-shadow:0 0 8px rgba(245,158,11,.4)!important;}}
 .task.overlap{{border-color:#ef4444!important;box-shadow:0 0 10px rgba(239,68,68,.5)!important;}}
+.task.departed{{
+  opacity:0.55;
+  background:repeating-linear-gradient(
+    45deg,rgba(255,255,255,.06),rgba(255,255,255,.06) 3px,transparent 3px,transparent 8px
+  ) !important;
+  border:1.5px solid rgba(255,255,255,.2) !important;
+  filter:saturate(0.4);
+}}
 /* ─── Tooltip ─── */
 /* ─── Shift popup ─── */
 #shift-pop{{
@@ -1508,7 +1516,23 @@ body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;d
 <body>
 <div id="tip"></div>
 <div id="shift-pop" class="hidden"></div>
-<div id="wrap"><div id="inner"></div></div>
+<div id="controls" style="
+  background:#04080f;padding:8px 14px;
+  display:flex;align-items:center;gap:10px;
+  border-bottom:1px solid #0d3050;flex-shrink:0;direction:rtl;
+">
+  <span style="font-size:12px;color:rgba(0,201,190,.8);font-weight:800;">הצג שעות:</span>
+  <select id="sel-from" style="
+    background:#0d1f30;color:#c8d8ec;border:1px solid #1a3a5a;
+    border-radius:8px;padding:4px 10px;font-size:13px;font-weight:700;cursor:pointer;
+  "></select>
+  <span style="color:#475569;font-size:13px;">—</span>
+  <select id="sel-to" style="
+    background:#0d1f30;color:#c8d8ec;border:1px solid #1a3a5a;
+    border-radius:8px;padding:4px 10px;font-size:13px;font-weight:700;cursor:pointer;
+  "></select>
+</div>
+<div id="wrap" style="flex:1;overflow-y:auto;overflow-x:auto;min-height:0;border:1px solid #1a2d42;"><div id="inner"></div></div>
 <div id="tray" style="display:none"><div id="tray-title">✈️ טיסות ללא שיבוץ — גרור לשורת עובד</div><div id="tray-cards"></div></div>
 <script>
 const ROLE_ABBR={{
@@ -1523,20 +1547,49 @@ const ROLE_ABBR={{
 }};
 const WORKERS={gdata};
 const RCOLORS={rcolors};
-const DAY_MIN={g_min},DAY_MAX={g_max},HOURS=DAY_MAX-DAY_MIN;
-const HPX=72,LW=140;
-const TOTAL_W=LW+HOURS*HPX+20;
+const DATA_MIN={g_min},DATA_MAX={g_max};
+const LW=140;
+function calcHPX(hours){{
+  const avail = window.innerWidth - LW - 24;
+  return Math.max(18, Math.floor(avail / hours));
+}}
 
-function h2px(s){{
+// ── Populate time selectors ──
+const selFrom=document.getElementById("sel-from");
+const selTo  =document.getElementById("sel-to");
+for(let h=0;h<=25;h++){{
+  const lbl=String(h%24).padStart(2,"0")+":00";
+  const o1=new Option(lbl,h); selFrom.appendChild(o1);
+  const o2=new Option(lbl,h); selTo.appendChild(o2);
+}}
+selFrom.value=DATA_MIN;
+selTo.value  =Math.min(DATA_MAX,25);
+selFrom.addEventListener("change",renderGantt);
+selTo.addEventListener("change",  renderGantt);
+
+function h2px(s,dayMin){{
   if(!s||s==="nan")return 0;
   const p=s.split(":");
-  return(parseInt(p[0]||0)+parseInt(p[1]||0)/60-DAY_MIN)*HPX;
+  return(parseInt(p[0]||0)+parseInt(p[1]||0)/60-dayMin)*HPX;
 }}
 function t2min(s){{
   if(!s||s==="nan")return 0;
   const p=s.split(":");
   return parseInt(p[0]||0)*60+parseInt(p[1]||0);
 }}
+
+function renderGantt(){{
+  const DAY_MIN=parseInt(selFrom.value);
+  const DAY_MAX=parseInt(selTo.value)  >DAY_MIN ? parseInt(selTo.value) : DAY_MIN+1;
+  const HOURS=DAY_MAX-DAY_MIN;
+  const HPX=calcHPX(HOURS);
+  const TOTAL_W=LW+HOURS*HPX+40;
+  const inner=document.getElementById("inner");
+  inner.innerHTML="";
+  inner.style.cssText=`position:relative;width:${{TOTAL_W}}px;min-width:${{TOTAL_W}}px;`;
+  // current time for departed detection
+  const _now=new Date();
+  const _nowMin=_now.getHours()*60+_now.getMinutes();
 
 // ─── Detect overlaps per worker ──
 WORKERS.forEach(w=>{{
@@ -1553,9 +1606,6 @@ WORKERS.forEach(w=>{{
   }}
 }});
 
-const inner=document.getElementById("inner");
-inner.style.cssText=`position:relative;width:${{TOTAL_W+60}}px;min-width:${{TOTAL_W+60}}px;padding-right:60px;`;
-
 // ─── Header row with hour labels ──
 const hdrRow=document.createElement("div");
 hdrRow.className="hdr-row";
@@ -1564,7 +1614,7 @@ hdrLbl.className="hdr-lbl";
 hdrRow.appendChild(hdrLbl);
 const hdrHrs=document.createElement("div");
 hdrHrs.className="hdr-hours";
-hdrHrs.style.width=`${{HOURS*HPX+80}}px`;
+hdrHrs.style.width=`${{HOURS*HPX+40}}px`;
 for(let h=0;h<=HOURS;h++){{
   const tick=document.createElement("div");
   tick.className="h-tick";
@@ -1660,7 +1710,7 @@ WORKERS.forEach(w=>{{
   // Timeline
   const tl=document.createElement("div");
   tl.className="timeline";
-  tl.style.width=(HOURS*HPX+80)+"px";
+  tl.style.width=(HOURS*HPX+40)+"px";
 
   // Vertical grid lines
   for(let h=0;h<=HOURS;h++){{
@@ -1671,14 +1721,16 @@ WORKERS.forEach(w=>{{
 
   // Task blocks
   w.tasks.forEach(t=>{{
-    const x1=h2px(t.start),x2=h2px(t.end);
+    const x1=h2px(t.start,DAY_MIN),x2=h2px(t.end,DAY_MIN);
     const bw=Math.max(x2-x1,8);
     const d=document.createElement("div");
-    d.className="task"+(t.overlap?" overlap":"")+(t.etd_changed?" etd-changed":"");
+    const _tEndMin=t2min(t.end);
+    const _departed=_tEndMin>0&&_tEndMin<_nowMin&&!(t.start>t.end);
+    d.className="task"+(t.overlap?" overlap":"")+(t.etd_changed?" etd-changed":"")+(_departed?" departed":"");
     d.style.cssText=`left:${{x1.toFixed(1)}}px;width:${{bw.toFixed(1)}}px;background:${{t.color}};`;
     const abbr = ROLE_ABBR[t.role] || t.role.substring(0,4);
     const label = t.flight ? t.flight + " · " + abbr : abbr;
-    d.textContent = label;
+    d.textContent = (_departed ? "✈ " : "") + label;
     d.dataset.idx=t.idx;
     d.dataset.worker=w.name;
     d.dataset.role=t.role;
@@ -1756,6 +1808,9 @@ WORKERS.forEach(w=>{{
   row.appendChild(tl);
   inner.appendChild(row);
 }});
+}} // end renderGantt
+renderGantt(); // initial render
+
 // ── Tray: unassigned flights ──────────────────────────────────
 if(MISSING && MISSING.length > 0){{
   const tray = document.getElementById("tray");
