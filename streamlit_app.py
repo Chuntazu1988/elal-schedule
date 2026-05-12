@@ -343,19 +343,26 @@ if _gantt_swap:
     _color   = "#00c9be" if _is_ok else "#ef4444"
     if _swap_msg:
         st.session_state["_gantt_swap_msg"] = _swap_msg
-    # שלח הודעה חזרה לטאב הגאנט (אם פתוח)
-    _components.html(f"""<script>
-(function(){{
-  // find gantt tab via window name
-  try {{
-    var g=window.open("","_gantt");
-    if(g&&!g.closed){{
-      g.showSwapMsg("{_swap_msg.replace('"','')}", "{_color}");
-    }}
-  }} catch(e){{}}
-}})();
-</script>""", height=0)
     st.rerun()
+
+# ── localStorage polling bridge — detects swaps from gantt tab ──────────────
+_components.html("""<script>
+(function(){
+  function poll(){
+    try{
+      var v=localStorage.getItem("gantt_swap_pending");
+      if(v){
+        localStorage.removeItem("gantt_swap_pending");
+        var url=window.top.location.href.split("?")[0]+"?gantt_swap="+v;
+        window.top.location.href=url;
+        return;
+      }
+    }catch(e){}
+    setTimeout(poll,600);
+  }
+  poll();
+})();
+</script>""", height=0)
 
 daily_file     = sidebar_daily or st.session_state.get("daily_file_obj")
 employees_file = sidebar_emp   or st.session_state.get("employees_file_obj")
@@ -1532,7 +1539,7 @@ const W={gdata}, MISS={mdata};
 const G_MIN={g_min}, G_MAX={g_max};
 const LW=110, HPX=42;
 let viewStart=G_MIN;
-const VIEW=G_MAX-G_MIN; // full range
+const VIEW=Math.max(G_MAX-G_MIN, 26); // min 26h
 
 function pad(h){{return String(h%24).padStart(2,"0")+":00"}}
 function hm2min(s){{
@@ -1677,15 +1684,18 @@ function doSwap(idx,newWorker){{
   _swapBusy=true;
   showSwapMsg("⏳ מעדכן שיבוץ...","#00c9be");
   const encoded=idx+":"+encodeURIComponent(newWorker);
+  // store in localStorage — Streamlit polls and picks this up
+  try{{ localStorage.setItem("gantt_swap_pending", encoded); }}catch(e){{}}
+  // also try direct opener navigation as fallback
   setTimeout(()=>{{
-    const base=window.location.href.split("?")[0];
-    if(window.opener&&!window.opener.closed){{
-      window.opener.location.href=
-        window.opener.location.href.split("?")[0]+"?gantt_swap="+encoded;
-    }} else {{
-      window.location.href=base+"?gantt_swap="+encoded;
-    }}
-  }},300);
+    try{{
+      if(window.opener&&!window.opener.closed){{
+        window.opener.location.href=
+          window.opener.location.href.split("?")[0]+"?gantt_swap="+encoded;
+      }}
+    }}catch(e){{}}
+    setTimeout(()=>{{ _swapBusy=false; }}, 3000);
+  }},200);
 }}
 
 // tray
