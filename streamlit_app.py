@@ -1487,14 +1487,13 @@ body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;d
 /* ─── Tooltip ─── */
 /* ─── Shift popup ─── */
 #shift-pop{{
-  position:absolute;
+  position:fixed;
   background:#0d1f30;color:#c8d8ec;
   border:1px solid rgba(0,201,190,.5);border-radius:10px;
   padding:10px 14px;font-size:12px;direction:rtl;text-align:right;
-  z-index:100;min-width:130px;pointer-events:none;
+  z-index:9999;min-width:150px;pointer-events:none;
   box-shadow:0 6px 20px rgba(0,0,0,.55);
-  line-height:1.7;
-  transition:opacity .15s;
+  line-height:1.8;
 }}
 #shift-pop.hidden{{display:none;}}
 #tip{{
@@ -1555,7 +1554,7 @@ WORKERS.forEach(w=>{{
 }});
 
 const inner=document.getElementById("inner");
-inner.style.cssText=`position:relative;width:${{TOTAL_W}}px;min-width:${{TOTAL_W}}px;`;
+inner.style.cssText=`position:relative;width:${{TOTAL_W+60}}px;min-width:${{TOTAL_W+60}}px;padding-right:60px;`;
 
 // ─── Header row with hour labels ──
 const hdrRow=document.createElement("div");
@@ -1629,16 +1628,32 @@ WORKERS.forEach(w=>{{
     e.stopPropagation();
     const pop = document.getElementById("shift-pop");
     const rect = lbl.getBoundingClientRect();
-    const wrapRect = document.getElementById("wrap").getBoundingClientRect();
-    // position below the label
-    pop.style.top  = (rect.bottom - wrapRect.top + document.getElementById("wrap").scrollTop + 4) + "px";
-    pop.style.left = (rect.left   - wrapRect.left + 4) + "px";
     const ss = w.shift_start || "—";
     const se = w.shift_end   || "—";
-    pop.innerHTML = `<div style="font-weight:900;color:#00c9be;margin-bottom:4px;">${{w.name}}</div>`
-                  + `<div>🕐 משמרת</div>`
-                  + `<div style="font-size:13px;font-weight:800;">${{ss}} – ${{se}}</div>`;
+    pop.innerHTML =
+      `<div style="font-weight:900;color:#00c9be;margin-bottom:6px;font-size:13px;">${{w.name}}</div>`
+    + `<div style="display:flex;justify-content:space-between;gap:20px;font-size:13px;font-weight:800;">`
+    + `<span style="color:#94a3b8;font-size:11px;">כניסה</span>`
+    + `<span style="color:#94a3b8;font-size:11px;">יציאה</span>`
+    + `</div>`
+    + `<div style="display:flex;justify-content:space-between;gap:20px;font-size:15px;font-weight:900;">`
+    + `<span style="color:#00c9be;">${{ss}}</span>`
+    + `<span style="color:#f59e0b;">${{se}}</span>`
+    + `</div>`;
+    // position below the label using fixed coords
+    const top = rect.bottom + 4;
+    const left = Math.max(4, rect.left);
+    pop.style.top  = top  + "px";
+    pop.style.left = left + "px";
     pop.classList.remove("hidden");
+    // auto-close after 3 seconds
+    clearTimeout(pop._timer);
+    pop._timer = setTimeout(()=>pop.classList.add("hidden"), 3000);
+  }});
+  // also support touch
+  lbl.addEventListener("touchend", function(e){{
+    e.preventDefault();
+    lbl.click();
   }});
   row.appendChild(lbl);
 
@@ -1685,6 +1700,28 @@ WORKERS.forEach(w=>{{
       d.style.opacity="0.5";
     }});
     d.addEventListener("dragend",()=>{{ d.style.opacity="1"; dragInfo=null; }});
+
+    // ── Touch drag (mobile) ──
+    d.addEventListener("touchstart",e=>{{
+      dragInfo={{idx:t.idx,worker:w.name,role:t.role}};
+      d.style.opacity="0.6";
+      d._touchActive=true;
+    }},{{passive:true}});
+    d.addEventListener("touchend",e=>{{
+      d.style.opacity="1";
+      if(!d._touchActive||!dragInfo)return;
+      d._touchActive=false;
+      const touch=e.changedTouches[0];
+      const target=document.elementFromPoint(touch.clientX,touch.clientY);
+      if(target){{
+        const targetRow=target.closest(".wrow");
+        if(targetRow&&targetRow.dataset.worker!==w.name){{
+          const encoded=dragInfo.idx+":"+encodeURIComponent(targetRow.dataset.worker);
+          window.parent.location.href=window.parent.location.href.split("?")[0]+"?gantt_swap="+encoded;
+        }}
+      }}
+      dragInfo=null;
+    }});
 
     tl.appendChild(d);
   }});
