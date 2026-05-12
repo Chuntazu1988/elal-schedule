@@ -236,12 +236,10 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
 
     _sched = st.session_state["schedule_df"]
     _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
-
-    # Build gantt inline — reuse the function after it's defined
-    # We store params and render after definition
     st.session_state["_gantt_render_now"] = True
     st.session_state["_gantt_miss"]       = _miss
     st.session_state["_gantt_sched"]      = _sched
+    st.session_state["_gantt_placeholder"] = st.empty()
 
 with st.sidebar:
     st.header("📂 העלאת קבצים")
@@ -1744,10 +1742,13 @@ if(MISSING && MISSING.length > 0){{
 
 # ── גאנט: רנדור אחרי הגדרת הפונקציה ──────────────────────────────────────
 if st.session_state.pop("_gantt_render_now", False):
-    _sched = st.session_state.pop("_gantt_sched", None)
-    _miss  = st.session_state.pop("_gantt_miss",  None)
+    _sched       = st.session_state.pop("_gantt_sched", None)
+    _miss        = st.session_state.pop("_gantt_miss",  None)
+    _placeholder = st.session_state.pop("_gantt_placeholder", None)
     if _sched is not None:
-        _render_interactive_gantt(_sched, _sched, missing_df=_miss)
+        _ctx = _placeholder if _placeholder is not None else st
+        with _ctx:
+            _render_interactive_gantt(_sched, _sched, missing_df=_miss)
     st.stop()
 
 
