@@ -236,10 +236,7 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
 
     _sched = st.session_state["schedule_df"]
     _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
-    st.session_state["_gantt_render_now"] = True
-    st.session_state["_gantt_miss"]       = _miss
-    st.session_state["_gantt_sched"]      = _sched
-    st.session_state["_gantt_placeholder"] = st.empty()
+    _render_interactive_gantt(_sched, _sched, missing_df=_miss)
 
 with st.sidebar:
     st.header("📂 העלאת קבצים")
@@ -1353,7 +1350,8 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
     all_s = pd.to_datetime(timed_g["התחלה"], format="%H:%M", errors="coerce")
     all_e = pd.to_datetime(timed_g["סיום"],   format="%H:%M", errors="coerce")
     g_min = max(int(all_s.dt.hour.min()) - 1, 0)
-    g_max = min(int(all_e.dt.hour.max()) + 2, 24)
+    _end_max = all_e.dt.hour.max() + (1 if all_e.dt.minute.max() > 0 else 0)
+    g_max = min(int(_end_max) + 2, 25)  # allow up to hour 25 (01:00 next day)
 
     all_workers = sorted([w for w in timed_g["עובד"].unique() if "❌" not in str(w)])
 
@@ -1710,17 +1708,11 @@ if(MISSING && MISSING.length > 0){{
 }}
 </script></body></html>"""
 
-    st.download_button(
-        "⬇️ הורד גאנט כ-HTML",
-        data=gantt_html.encode("utf-8"),
-        file_name="gantt.html", mime="text/html",
-        use_container_width=True,
-    )
-    # ── missing flights data ──
+    # ── inject missing flights into HTML ──
     missing_flights_data = []
     if missing_df is not None and not missing_df.empty:
         for _, mrow in missing_df.iterrows():
-            role  = normalize_role_label(str(mrow.get("תפקיד בסיס", "")))
+            role = normalize_role_label(str(mrow.get("תפקיד בסיס", "")))
             missing_flights_data.append({
                 "idx":    int(mrow.name),
                 "flight": str(mrow.get("טיסה", "")).replace("LY","").strip(),
@@ -1729,27 +1721,33 @@ if(MISSING && MISSING.length > 0){{
                 "end":    str(mrow.get("סיום",   "")),
                 "color":  "#374151",
             })
-
     missing_json = _json.dumps(missing_flights_data, ensure_ascii=False)
     gantt_html_final = gantt_html.replace(
         "const WORKERS=",
         f"const MISSING={missing_json};\nconst WORKERS="
     )
 
-    _components.html(gantt_html_final, height=820, scrolling=False)
+    # ── פתח בחלון חדש דרך Blob URL ──
+    import base64 as _b64
+    _encoded = _b64.b64encode(gantt_html_final.encode("utf-8")).decode("ascii")
+    _open_js = f"""
+    <script>
+    (function() {{
+        var b64 = "{_encoded}";
+        var bin = atob(b64);
+        var bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        var blob = new Blob([bytes], {{type: "text/html; charset=utf-8"}});
+        var url  = URL.createObjectURL(blob);
+        window.open(url, "_blank");
+    }})();
+    </script>
+    """
+    _components.html(_open_js, height=0)
 
 
 
-# ── גאנט: רנדור אחרי הגדרת הפונקציה ──────────────────────────────────────
-if st.session_state.pop("_gantt_render_now", False):
-    _sched       = st.session_state.pop("_gantt_sched", None)
-    _miss        = st.session_state.pop("_gantt_miss",  None)
-    _placeholder = st.session_state.pop("_gantt_placeholder", None)
-    if _sched is not None:
-        _ctx = _placeholder if _placeholder is not None else st
-        with _ctx:
-            _render_interactive_gantt(_sched, _sched, missing_df=_miss)
-    st.stop()
+
 
 
 def recompute_from_schedule(schedule_df, flights_df, employees_df):
