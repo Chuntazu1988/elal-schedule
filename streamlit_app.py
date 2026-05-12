@@ -1489,15 +1489,7 @@ body{{font-family:"Segoe UI",Arial,sans-serif;background:#04080f;color:#cdd8e8;d
   font-size:11px;color:rgba(0,201,190,.7);font-weight:700;
   white-space:nowrap;
 }}
-/* ─── Legend — sticky below header ─── */
-#legend{{
-  display:flex;flex-wrap:wrap;gap:10px;padding:8px 14px;
-  border-bottom:1px solid #0d1f2d;background:#04080f;
-  position:sticky;top:32px;z-index:20;
-  min-width:max-content;
-}}
-.leg-item{{display:flex;align-items:center;gap:5px;font-size:11px;color:#8a9ab5;}}
-.leg-dot{{width:12px;height:12px;border-radius:4px;}}
+
 /* ─── Worker rows ─── */
 .wrow{{
   display:flex;align-items:stretch;min-height:50px;
@@ -1600,7 +1592,7 @@ const WORKERS={gdata};
 const RCOLORS={rcolors};
 const DATA_MIN={g_min},DATA_MAX={g_max};
 const LW=140;
-let HPX=90; // fixed — always 55px per hour, user scrolls horizontally
+let HPX=55; // fixed — always 55px per hour, user scrolls horizontally
 
 // ── Window view: 8h window, shiftable by 3h ──
 const VIEW_HOURS = 8;                  // hours visible at once
@@ -1635,7 +1627,7 @@ function renderGantt(){{
   const DAY_MAX=viewStart + VIEW_HOURS;
   const HOURS=VIEW_HOURS;
   updateLabel();
-  HPX=90; // fixed px per hour
+  HPX=55; // zoomed out
   const TOTAL_W=LW+HOURS*HPX+40;
   const inner=document.getElementById("inner");
   inner.innerHTML="";
@@ -1679,24 +1671,7 @@ hdrRow.appendChild(hdrHrs);
 inner.appendChild(hdrRow);
 
 // ─── Legend ──
-const legend=document.createElement("div");
-legend.id="legend";
-Object.entries(RCOLORS).forEach(([role,color])=>{{
-  const li=document.createElement("div");li.className="leg-item";
-  const dot=document.createElement("div");dot.className="leg-dot";
-  dot.style.background=color;
-  li.appendChild(dot);
-  const span=document.createElement("span");span.textContent=role;
-  li.appendChild(span);
-  legend.appendChild(li);
-}});
-const liOv=document.createElement("div");liOv.className="leg-item";
-liOv.innerHTML='<div class="leg-dot" style="background:#ef4444;border:2px solid #ef4444;"></div><span>חפיפה</span>';
-legend.appendChild(liOv);
-const liChg=document.createElement("div");liChg.className="leg-item";
-liChg.innerHTML='<div class="leg-dot" style="background:#f59e0b;border:2px solid #f59e0b;"></div><span>ETD עודכן</span>';
-legend.appendChild(liChg);
-inner.appendChild(legend);
+
 
 // ─── Tooltip ──
 const tip=document.getElementById("tip");
@@ -1973,6 +1948,104 @@ if(MISSING && MISSING.length > 0){{
 
 
 
+# ── ייצוא טבלה — עמוד נפרד ──────────────────────────────────────────────────
+if st.session_state.pop("show_table_export", False) and "schedule_df" in st.session_state:
+    import json as _json_t
+    _od = output_df if "output_df" in dir() else None
+    if _od is not None:
+        _rows_html = ""
+        for _, _r in _od.iterrows():
+            _cells = "".join(
+                f'<td style="border:1px solid #1a3a5a;padding:6px 10px;white-space:nowrap;'
+                f'color:{"#ef4444" if "❌" in str(v) else "#c8d8ec"};">'
+                f'{str(v)}</td>'
+                for v in _r
+            )
+            _rows_html += f"<tr>{_cells}</tr>"
+        _hdrs = "".join(
+            f'<th style="background:#0d1f30;border:1px solid #1a3a5a;padding:8px 10px;'
+            f'font-size:11px;color:#00c9be;white-space:nowrap;">{c}</th>'
+            for c in _od.columns
+        )
+        _table_html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5">
+<title>לוח שיבוץ</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0;}}
+body{{background:#04080f;color:#c8d8ec;font-family:"Segoe UI",Arial,sans-serif;direction:rtl;}}
+#top{{
+  position:sticky;top:0;background:#04080f;z-index:10;
+  padding:8px 12px;border-bottom:1px solid #0d3050;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+}}
+#mode-btn{{
+  background:#0d1f30;color:#00c9be;border:1px solid rgba(0,201,190,.4);
+  border-radius:8px;padding:5px 14px;font-size:13px;font-weight:800;cursor:pointer;
+}}
+#search{{
+  background:#0d1f30;color:#c8d8ec;border:1px solid #1a3a5a;
+  border-radius:8px;padding:5px 12px;font-size:13px;flex:1;min-width:140px;
+}}
+#wrap{{overflow:auto;padding:8px;}}
+table{{border-collapse:collapse;font-size:12px;}}
+tr:hover td{{background:rgba(0,201,190,.06)!important;}}
+#landscape-warn{{
+  display:none;position:fixed;inset:0;background:#04080f;
+  z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:16px;
+  font-size:18px;color:#c8d8ec;text-align:center;
+}}
+/* on mobile portrait — show the rotate warning */
+@media screen and (max-width:768px) and (orientation:portrait) {{
+  #landscape-warn{{display:flex;}}
+}}
+</style>
+</head>
+<body>
+<div id="landscape-warn">
+  <div style="font-size:48px;">🔄</div>
+  <div>סובב את המכשיר למצב Landscape לצפייה בטבלה</div>
+</div>
+<div id="top">
+  <span style="font-size:14px;font-weight:900;color:#00c9be;">✈️ לוח שיבוץ</span>
+  <input id="search" placeholder="חפש..." oninput="filterTable(this.value)">
+  <button id="mode-btn" onclick="toggleMode()">🔄 Landscape / Portrait</button>
+</div>
+<div id="wrap">
+  <table id="tbl">
+    <thead><tr>{_hdrs}</tr></thead>
+    <tbody id="tbody">{_rows_html}</tbody>
+  </table>
+</div>
+<script>
+function filterTable(q){{
+  const rows=document.querySelectorAll("#tbody tr");
+  rows.forEach(r=>{{
+    r.style.display=r.textContent.toLowerCase().includes(q.toLowerCase())?"":"none";
+  }});
+}}
+function toggleMode(){{
+  if(document.documentElement.style.transform==="rotate(90deg) translateY(-100%)"){{
+    document.documentElement.style.cssText="";
+  }} else {{
+    document.documentElement.style.cssText=
+      "transform:rotate(90deg) translateY(-100%);transform-origin:top left;"
+      +"width:100vh;height:100vw;overflow:hidden;";
+  }}
+}}
+</script>
+</body></html>"""
+        import base64 as _b64t
+        _enc = _b64t.b64encode(_table_html.encode("utf-8")).decode("ascii")
+        _components.html(f"""<script>
+var b=atob("{_enc}");
+var bytes=new Uint8Array(b.length);
+for(var i=0;i<b.length;i++) bytes[i]=b.charCodeAt(i);
+var blob=new Blob([bytes],{{type:"text/html;charset=utf-8"}});
+window.open(URL.createObjectURL(blob),"_blank");
+</script>""", height=0)
+
+
 # ── גאנט: רנדור אחרי הגדרת הפונקציה ──────────────────────────────────────
 if _goto_gantt_early and "schedule_df" in st.session_state:
     st.session_state.pop("show_gantt_page", None)
@@ -2140,6 +2213,10 @@ if "schedule_df" in st.session_state:
         # ── Tab: לוח מבצעים ──────────────────────────────────────────────────
         with tab_schedule:
             st.markdown('<div class="ops-rtl"><h3>✈️ Assignment Board</h3></div>', unsafe_allow_html=True)
+            # ── כפתור ייצוא לעמוד נפרד ──────────────────────────────────────
+            if st.button("📤 פתח טבלה בעמוד נפרד", use_container_width=False, key="open_table_page"):
+                st.session_state["show_table_export"] = True
+                st.rerun()
             search       = st.text_input("🔎 חיפוש לפי טיסה / יעד / עובד")
             only_missing = st.checkbox("הצג רק טיסות עם חוסר")
             display_df   = output_df.copy()
