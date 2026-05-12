@@ -1493,7 +1493,7 @@ html,body{{height:100%;background:#04080f;color:#c8d8ec;
 .hdr-time{{position:relative;height:20px}}
 .tick{{position:absolute;top:0;bottom:0;border-left:1px solid #0d3050;
   font-size:9px;color:rgba(0,201,190,.65);font-weight:700;
-  padding-left:2px;display:flex;align-items:center;white-space:nowrap}}
+  padding-left:2px;display:flex;align-items:center;white-space:nowrap;direction:ltr;}}
 /* ── rows ── */
 .wrow{{display:flex;align-items:stretch;min-height:20px;border-bottom:1px solid #0a1628}}
 .wrow:nth-child(even){{background:rgba(0,30,60,.2)}}
@@ -1501,7 +1501,7 @@ html,body{{height:100%;background:#04080f;color:#c8d8ec;
 .wlabel{{width:110px;min-width:110px;flex-shrink:0;font-size:9px;font-weight:700;
   color:#94a3b8;display:flex;align-items:center;padding:0 6px;
   position:sticky;left:0;background:#04080f;border-right:1px solid #0d3050;
-  cursor:pointer;z-index:5}}
+  cursor:pointer;z-index:5;direction:ltr;}}
 .wrow:nth-child(even) .wlabel{{background:#04080f}}
 .tl{{position:relative;flex:1}}
 .vline{{position:absolute;top:0;bottom:0;border-left:1px solid rgba(13,48,80,.5);pointer-events:none}}
@@ -1522,14 +1522,14 @@ html,body{{height:100%;background:#04080f;color:#c8d8ec;
 /* ── popup ── */
 #pop{{position:fixed;background:#0d1f30;color:#c8d8ec;
   border:1px solid rgba(0,201,190,.5);border-radius:8px;
-  padding:8px 12px;font-size:11px;z-index:999;display:none;direction:ltr;
+  padding:8px 12px;font-size:11px;z-index:999;display:none;direction:ltr;text-align:left;
   box-shadow:0 4px 16px rgba(0,0,0,.5);min-width:130px}}
 </style></head>
 <body>
 <div id="bar">
-  <button class="nav-btn" onclick="shift(-12)">◀ 12-</button>
-  <span id="time-lbl"></span>
-  <button class="nav-btn" onclick="shift(12)">12+ ▶</button>
+  <button class="nav-btn" onclick="shift(-12)" style="direction:ltr;">◀ -12h</button>
+  <span id="time-lbl" style="direction:ltr;"></span>
+  <button class="nav-btn" onclick="shift(12)" style="direction:ltr;">+12h ▶</button>
 </div>
 <div id="pop"></div>
 <div id="outer"><div id="inner"></div></div>
@@ -1576,8 +1576,22 @@ function render(){{
   const ht=document.createElement("div");ht.className="hdr-time";
   ht.style.width=(VIEW*HPX+80)+"px";
   for(let h=0;h<=VIEW;h++){{
+    const absH=viewStart+h;
     const t=document.createElement("div");t.className="tick";
-    t.style.left=(h*HPX)+"px";t.textContent=pad(viewStart+h);
+    t.style.left=(h*HPX)+"px";
+    const lbl=pad(absH);
+    // midnight crossing: second 00:00 means new day
+    if(absH>=24&&absH%24===0){{
+      t.textContent="00:00 +1";
+      t.style.color="#f59e0b";t.style.fontWeight="900";
+      // add vertical midnight line
+      const ml=document.createElement("div");
+      ml.style.cssText=`position:absolute;left:${{h*HPX}}px;top:0;bottom:0;`
+        +`border-left:2px dashed rgba(245,158,11,.5);pointer-events:none;z-index:1;`;
+      tl_midnight=ml;
+    }} else {{
+      t.textContent=lbl;
+    }}
     ht.appendChild(t);
   }}
   hdr.appendChild(ht);el.appendChild(hdr);
@@ -1608,7 +1622,15 @@ function render(){{
     const tl=document.createElement("div");tl.className="tl";
     tl.style.width=(VIEW*HPX+80)+"px";
     for(let h=0;h<=VIEW;h++){{
-      const v=document.createElement("div");v.className="vline";v.style.left=(h*HPX)+"px";tl.appendChild(v);
+      const v=document.createElement("div");v.className="vline";
+      const absH2=viewStart+h;
+      if(absH2>=24&&absH2%24===0){{
+        v.style.cssText=`position:absolute;left:${{h*HPX}}px;top:0;bottom:0;`
+          +`border-left:2px dashed rgba(245,158,11,.4);pointer-events:none;`;
+      }} else {{
+        v.style.left=(h*HPX)+"px";
+      }}
+      tl.appendChild(v);
     }}
     w.tasks.forEach(t=>{{
       const x1=h2x(t.start),x2=h2x(t.end);
@@ -1623,6 +1645,21 @@ function render(){{
       d.textContent=(end>0&&end<nowMin?"✈ ":"")+t.flight+(t.flight?" · ":"")+t.abbr;
       d.title=`${{w.name}} | ${{t.role}} | ${{t.start}}–${{t.end}}`;
       d.setAttribute("draggable","true");
+      // short click/tap → task info popup
+      d.addEventListener("click",e=>{{
+        e.stopPropagation();
+        const pop=document.getElementById("pop");
+        const isNext=hm2min(t.end)>0&&(viewStart+hm2min(t.end)/60)>=24;
+        pop.innerHTML=
+          `🕐 <strong style="color:#00c9be">${{t.start}} – ${{t.end}}</strong>`
+          +(isNext?` <span style="color:#f59e0b;font-size:10px;">(+1)</span>`:"");
+        pop.style.display="block";
+        const rect=d.getBoundingClientRect();
+        const pw=Math.max(pop.offsetWidth,150);
+        pop.style.left=Math.max(4,Math.min(rect.left,window.innerWidth-pw-4))+"px";
+        pop.style.top=Math.max(4,rect.top-pop.offsetHeight-6)+"px";
+        clearTimeout(pop._t);pop._t=setTimeout(()=>pop.style.display="none",3000);
+      }});
       // desktop drag
       d.addEventListener("dragstart",e=>{{
         dragInfo={{idx:t.idx,worker:w.name}};
@@ -1672,7 +1709,7 @@ function showSwapMsg(msg,color){{
   n.style.cssText="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);"
     +"background:#0d1f30;color:"+color+";border:2px solid "+color+";"
     +"border-radius:12px;padding:14px 24px;font-size:14px;font-weight:800;"
-    +"z-index:9999;direction:rtl;text-align:center;box-shadow:0 6px 20px rgba(0,0,0,.5);";
+    +"z-index:9999;direction:ltr;text-align:center;box-shadow:0 6px 20px rgba(0,0,0,.5);";
   n.textContent=msg;
   document.body.appendChild(n);
   setTimeout(()=>n.remove(),3000);
