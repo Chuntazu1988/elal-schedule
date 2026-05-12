@@ -312,7 +312,27 @@ if _gantt_swap:
                 )
                 if _new_wrkr not in _candidates:
                     _valid = False
-                    _swap_msg = f"⚠️ {_new_wrkr} אינו מוסמך / אינו במשמרת / יש חפיפה"
+                    # בדוק מדוע לא עובר ולידציה
+                    _emp_r = _emp_snap[_emp_snap["שם"] == _new_wrkr]
+                    if _emp_r.empty:
+                        _reason = "לא נמצא בקובץ העובדים"
+                    else:
+                        from helpers import classify_shift, is_within_shift
+                        from scheduler import to_datetime_time, is_time_text
+                        _er = _emp_r.iloc[0]
+                        if is_time_text(_t_start) and is_time_text(_t_end):
+                            try:
+                                _ts2 = to_datetime_time(_t_start)
+                                _te2 = to_datetime_time(_t_end)
+                                if not is_within_shift(_er, _ts2, _te2):
+                                    _reason = f"מחוץ לשעות המשמרת ({_er.get('תחילת משמרת','?')}–{_er.get('סוף משמרת','?')})"
+                                else:
+                                    _reason = "אין הסמכה לתפקיד זה או יש חפיפה"
+                            except Exception:
+                                _reason = "אין הסמכה / חפיפה"
+                        else:
+                            _reason = "אין הסמכה / חפיפה"
+                    _swap_msg = f"⛔ לא ניתן לשבץ {_new_wrkr}: {_reason}"
             if _valid:
                 # ── בדיקת רווח גדול בין משימות ──
                 def _hm2m(s):
@@ -343,6 +363,7 @@ if _gantt_swap:
     _color   = "#00c9be" if _is_ok else "#ef4444"
     if _swap_msg:
         st.session_state["_gantt_swap_msg"] = _swap_msg
+    st.session_state["show_gantt_page"] = True
     st.rerun()
 
 # ── localStorage polling bridge — detects swaps from gantt tab ──────────────
@@ -1467,6 +1488,13 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
     gdata = _j.dumps(workers_data, ensure_ascii=False)
     mdata = _j.dumps(missing_data, ensure_ascii=False)
 
+    # ── Streamlit base URL for swap navigation ──
+    try:
+        _st_host = st.context.headers.get("host", "")
+        _st_base = f"https://{_st_host}" if _st_host else ""
+    except Exception:
+        _st_base = ""
+
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1495,7 +1523,7 @@ html,body{{height:100%;background:#04080f;color:#c8d8ec;
   font-size:9px;color:rgba(0,201,190,.65);font-weight:700;
   padding-left:2px;display:flex;align-items:center;white-space:nowrap;direction:ltr;}}
 /* ── rows ── */
-.wrow{{display:flex;align-items:stretch;min-height:20px;border-bottom:1px solid #0a1628}}
+.wrow{{display:flex;align-items:stretch;min-height:20px;border-bottom:1px solid #0a1628;overflow:visible}}
 .wrow:nth-child(even){{background:rgba(0,30,60,.2)}}
 .wrow.drag-over{{background:rgba(0,201,190,.12)!important;outline:2px dashed rgba(0,201,190,.5)}}
 .wlabel{{width:110px;min-width:110px;flex-shrink:0;font-size:9px;font-weight:700;
@@ -1503,7 +1531,7 @@ html,body{{height:100%;background:#04080f;color:#c8d8ec;
   position:sticky;left:0;background:#04080f;border-right:1px solid #0d3050;
   cursor:pointer;z-index:5;direction:ltr;}}
 .wrow:nth-child(even) .wlabel{{background:#04080f}}
-.tl{{position:relative;flex:1;overflow:visible}}
+.tl{{position:relative;flex:none;overflow:visible}}
 .vline{{position:absolute;top:0;bottom:0;border-left:1px solid rgba(13,48,80,.5);pointer-events:none}}
 /* ── tasks ── */
 .task{{position:absolute;top:2px;height:16px;border-radius:4px;
@@ -1537,6 +1565,7 @@ html,body{{height:100%;background:#04080f;color:#c8d8ec;
 <script>
 const W={gdata}, MISS={mdata};
 const G_MIN={g_min}, G_MAX={g_max};
+const ST_BASE="{_st_base}";
 const LW=110, HPX=42;
 let viewStart=G_MIN;
 const VIEW=Math.max(G_MAX-G_MIN, 26); // min 26h
@@ -1721,18 +1750,16 @@ function doSwap(idx,newWorker){{
   _swapBusy=true;
   showSwapMsg("⏳ מעדכן שיבוץ...","#00c9be");
   const encoded=idx+":"+encodeURIComponent(newWorker);
-  // store in localStorage — Streamlit polls and picks this up
-  try{{ localStorage.setItem("gantt_swap_pending", encoded); }}catch(e){{}}
-  // also try direct opener navigation as fallback
-  setTimeout(()=>{{
-    try{{
-      if(window.opener&&!window.opener.closed){{
-        window.opener.location.href=
-          window.opener.location.href.split("?")[0]+"?gantt_swap="+encoded;
-      }}
-    }}catch(e){{}}
+  // navigate this blob tab to Streamlit with swap param
+  const target = (ST_BASE || (window.opener&&!window.opener.closed
+    ? window.opener.location.href.split("?")[0] : ""));
+  if(target) {{
+    window.location.href = target + "?gantt_swap=" + encoded;
+  }} else {{
+    // fallback: try localStorage bridge
+    try{{ localStorage.setItem("gantt_swap_pending", encoded); }}catch(e){{}}
     setTimeout(()=>{{ _swapBusy=false; }}, 3000);
-  }},200);
+  }}
 }}
 
 // tray
