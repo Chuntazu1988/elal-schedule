@@ -1515,9 +1515,8 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
                 "color": "#374151", "abbr": ROLE_ABBR.get(role, role[:4]),
             })
 
-    import base64 as _b64j
-    gdata = _b64j.b64encode(_j.dumps(workers_data, ensure_ascii=False).encode("utf-8")).decode("ascii")
-    mdata = _b64j.b64encode(_j.dumps(missing_data, ensure_ascii=False).encode("utf-8")).decode("ascii")
+    gdata = _j.dumps(workers_data, ensure_ascii=False)
+    mdata = _j.dumps(missing_data, ensure_ascii=False)
 
     # ── Streamlit base URL for swap navigation ──
     try:
@@ -1532,8 +1531,9 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
 <title>גאנט עובדים</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-html,body{{height:100%;background:#04080f;color:#c8d8ec;
-  font-family:"Segoe UI",Arial,sans-serif;overflow:hidden;display:flex;flex-direction:column}}
+html,body{{background:#04080f;color:#c8d8ec;
+  font-family:"Segoe UI",Arial,sans-serif;margin:0;padding:0;}}
+body{{display:flex;flex-direction:column;min-height:100vh;}}
 /* ── top bar ── */
 #bar{{flex-shrink:0;display:flex;align-items:center;gap:8px;padding:5px 10px;
   background:#060e1c;border-bottom:1px solid #0d3050;direction:ltr}}
@@ -1542,7 +1542,7 @@ html,body{{height:100%;background:#04080f;color:#c8d8ec;
 .nav-btn:active{{opacity:.7}}
 #time-lbl{{font-size:12px;color:#64748b;min-width:110px;text-align:center}}
 /* ── scroll container ── */
-#outer{{flex:1;overflow:auto;min-height:0}}
+#outer{{flex:1;overflow:auto;min-height:200px}}
 /* ── sticky header row ── */
 .hdr{{display:flex;position:sticky;top:0;z-index:20;
   background:#060e1c;border-bottom:2px solid #0d3050}}
@@ -1594,7 +1594,7 @@ html,body{{height:100%;background:#04080f;color:#c8d8ec;
 <div id="outer"><div id="inner"></div></div>
 <div id="tray"><div id="tray-inner"></div></div>
 <script>
-const W=JSON.parse(atob("{gdata}")), MISS=JSON.parse(atob("{mdata}"));
+const W={gdata}, MISS={mdata};
 const G_MIN={g_min}, G_MAX={g_max};
 const ST_BASE="{_st_base}";
 const LW=110, HPX=42;
@@ -1870,7 +1870,7 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
         if "❌" not in str(w) and str(w).strip() not in ("","nan")
     ))
     _h = max(700, _n_workers * 22 + 120)
-    _components.html(_html, height=_h, scrolling=False)
+    _components.html(_html, height=_h, scrolling=True)
     st.stop()
 
 
