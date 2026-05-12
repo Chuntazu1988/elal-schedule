@@ -1490,7 +1490,7 @@ const W={gdata}, MISS={mdata};
 const G_MIN={g_min}, G_MAX={g_max};
 const LW=110, HPX=42;
 let viewStart=G_MIN;
-const VIEW=Math.min(12,G_MAX-G_MIN);
+const VIEW=Math.min(24,G_MAX-G_MIN);
 
 function pad(h){{return String(h%24).padStart(2,"0")+":00"}}
 function hm2min(s){{
@@ -1545,9 +1545,12 @@ function render(){{
         +`<span style="color:#94a3b8">משמרת: </span>`
         +`<strong>${{w.shift_start||"?"}} – ${{w.shift_end||"?"}}</strong>`;
       pop.style.display="block";
-      pop.style.left=Math.min(e.clientX+8,window.innerWidth-160)+"px";
-      pop.style.top=(e.clientY+8)+"px";
-      clearTimeout(pop._t);pop._t=setTimeout(()=>pop.style.display="none",3000);
+      // position ABOVE the label
+      const rect=lbl.getBoundingClientRect();
+      const pw=pop.offsetWidth||140;
+      pop.style.left=Math.max(4,Math.min(rect.left,window.innerWidth-pw-4))+"px";
+      pop.style.top=Math.max(4,rect.top-pop.offsetHeight-6)+"px";
+      clearTimeout(pop._t);pop._t=setTimeout(()=>pop.style.display="none",4000);
     }});
     lbl.addEventListener("touchend",e=>{{e.preventDefault();lbl.click()}});
     row.appendChild(lbl);
@@ -1614,15 +1617,32 @@ function render(){{
   }});
 }}
 
+function showSwapMsg(msg,color){{
+  const n=document.createElement("div");
+  n.style.cssText="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);"
+    +"background:#0d1f30;color:"+color+";border:2px solid "+color+";"
+    +"border-radius:12px;padding:14px 24px;font-size:14px;font-weight:800;"
+    +"z-index:9999;direction:rtl;text-align:center;box-shadow:0 6px 20px rgba(0,0,0,.5);";
+  n.textContent=msg;
+  document.body.appendChild(n);
+  setTimeout(()=>n.remove(),3000);
+}}
+
+let _swapBusy=false;
 function doSwap(idx,newWorker){{
+  if(_swapBusy)return;
+  _swapBusy=true;
+  showSwapMsg("⏳ מעדכן שיבוץ...","#00c9be");
   const encoded=idx+":"+encodeURIComponent(newWorker);
-  const base=window.location.href.split("?")[0];
-  if(window.opener&&!window.opener.closed){{
-    window.opener.location.href=base.replace(window.location.href.split("?")[0],
-      window.opener.location.href.split("?")[0])+"?gantt_swap="+encoded;
-  }} else {{
-    window.location.href=base+"?gantt_swap="+encoded;
-  }}
+  setTimeout(()=>{{
+    const base=window.location.href.split("?")[0];
+    if(window.opener&&!window.opener.closed){{
+      window.opener.location.href=
+        window.opener.location.href.split("?")[0]+"?gantt_swap="+encoded;
+    }} else {{
+      window.location.href=base+"?gantt_swap="+encoded;
+    }}
+  }},300);
 }}
 
 // tray
