@@ -1449,11 +1449,15 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
             g_max = _last_h + (1 if _last_m == 0 else 2)
             g_max = min(g_max, 30)
 
-    # ── workers: from daily schedule only, sorted ──
-    daily_workers = set(
-        str(w).strip() for w in live_schedule["עובד"].dropna().unique()
-        if "❌" not in str(w) and str(w).strip() not in ("", "nan")
-    )
+    # ── workers: from rows that HAVE time data (timed) ──
+    # Also include workers from full schedule (counter workers without flights)
+    daily_workers = set()
+    for _col_src in [timed, live_schedule]:
+        if "עובד" in _col_src.columns:
+            for _w in _col_src["עובד"].dropna().unique():
+                _ws = str(_w).strip()
+                if "❌" not in _ws and _ws not in ("", "nan"):
+                    daily_workers.add(_ws)
 
     emp_snap = st.session_state.get("employees_snap")
 
@@ -1827,11 +1831,7 @@ if(MISS.length){{
 }}
 document.addEventListener("click",()=>document.getElementById("pop").style.display="none");
 render();
-// debug overlay — remove after fix
-const dbg=document.createElement("div");
-dbg.style.cssText="position:fixed;bottom:60px;left:4px;background:rgba(0,0,0,.8);color:#00c9be;font-size:10px;padding:4px 8px;border-radius:6px;z-index:9999;direction:ltr;";
-dbg.textContent="W:"+W.length+" MISS:"+MISS.length+" G:"+G_MIN+"-"+G_MAX+" VIEW:"+VIEW;
-document.body.appendChild(dbg);
+
 </script></body></html>"""
 
     return html
@@ -1856,13 +1856,11 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
     _sched = st.session_state["schedule_df"]
     _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
 
-    # debug: show column info
-    _dbg_workers = [str(w) for w in _sched["עובד"].dropna().unique() if "❌" not in str(w) and str(w).strip() not in ("","nan")]
-    _dbg_timed   = _sched[_sched["התחלה"].astype(str).str.strip() != ""]
-    st.caption(f"🔍 debug: {len(_sched)} rows | {len(_dbg_timed)} timed | {len(_dbg_workers)} workers | cols: {list(_sched.columns[:6])}")
-
     _html  = _render_interactive_gantt(_sched, _sched, missing_df=_miss)
-    _n_workers = len(_dbg_workers)
+    _n_workers = len(set(
+        str(w).strip() for w in _sched["עובד"].dropna().unique()
+        if "❌" not in str(w) and str(w).strip() not in ("","nan")
+    ))
     _h = max(700, _n_workers * 22 + 120)
     _components.html(_html, height=_h, scrolling=False)
     st.stop()
