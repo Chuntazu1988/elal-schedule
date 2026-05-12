@@ -1378,6 +1378,22 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
                 _shift_e = tlist[-1]["end"]
         workers_data.append({"name": worker, "tasks": tlist, "shift_start": _shift_s, "shift_end": _shift_e})
 
+    # ── סדר כרונולוגי: משמרות 21:00-23:59 ראשונות, אחר כך לפי שעת סיום ──
+    def _sort_key(w):
+        def _hm(s):
+            try:
+                parts = str(s).strip().split(":")
+                return int(parts[0])*60 + int(parts[1])
+            except Exception:
+                return 9999
+        ss = _hm(w.get("shift_start",""))
+        se = _hm(w.get("shift_end",""))
+        if ss >= 21*60:          # משמרת ערב/לילה של היום הקודם
+            return (0, ss, se)
+        else:                    # משמרות היום — לפי שעת סיום
+            return (1, se, ss)
+    workers_data.sort(key=_sort_key)
+
     gdata    = _json.dumps(workers_data,  ensure_ascii=False)
     rcolors  = _json.dumps(ROLE_COLORS_G, ensure_ascii=False)
     base_url = "?"   # relative — will be used with parent.location
@@ -1564,9 +1580,9 @@ for(let h=0;h<=25;h++){{
   const o2=new Option(lbl,h); selTo.appendChild(o2);
 }}
 // default: show first 12 hours of data (or all if less)
-selFrom.value=DATA_MIN;
-selTo.value=Math.min(DATA_MIN+12, DATA_MAX, 25);
-if(parseInt(selTo.value)<=parseInt(selFrom.value)) selTo.value=Math.min(DATA_MAX,25);
+// תצוגת 24 שעות: מ-00:00 עד 24:00
+selFrom.value=0;
+selTo.value=24;
 selFrom.addEventListener("change",renderGantt);
 selTo.addEventListener("change",  renderGantt);
 
@@ -1835,6 +1851,38 @@ if(MISSING && MISSING.length > 0){{
       card.style.opacity = "0.4";
     }});
     card.addEventListener("dragend", () => {{ card.style.opacity = "1"; dragInfo = null; }});
+    // touch drag for mobile
+    card.addEventListener("touchstart", e => {{
+      dragInfo = {{idx: m.idx, worker: "__missing__", role: m.role, isMissing: true}};
+      card.style.opacity = "0.5";
+      card._touchActive = true;
+    }}, {{passive: true}});
+    card.addEventListener("touchmove", e => {{
+      if(!card._touchActive) return;
+      const t = e.touches[0];
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      document.querySelectorAll(".wrow").forEach(r=>r.classList.remove("drag-over"));
+      if(el) {{ const row = el.closest(".wrow"); if(row) row.classList.add("drag-over"); }}
+    }}, {{passive: true}});
+    card.addEventListener("touchend", e => {{
+      card.style.opacity = "1";
+      document.querySelectorAll(".wrow").forEach(r=>r.classList.remove("drag-over"));
+      if(!card._touchActive || !dragInfo) return;
+      card._touchActive = false;
+      const t = e.changedTouches[0];
+      const target = document.elementFromPoint(t.clientX, t.clientY);
+      if(target) {{
+        const targetRow = target.closest(".wrow");
+        if(targetRow) {{
+          const encoded = dragInfo.idx + ":" + encodeURIComponent(targetRow.dataset.worker);
+          if(window.opener && !window.opener.closed) {{
+            window.opener.location.href = window.opener.location.href.split("?")[0] + "?gantt_swap=" + encoded;
+            window.close();
+          }}
+        }}
+      }}
+      dragInfo = null;
+    }});
     cards.appendChild(card);
   }});
 }}
