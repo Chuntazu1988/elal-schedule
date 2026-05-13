@@ -1849,18 +1849,21 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
     st.session_state.pop("show_gantt_page", None)
     if st.button("← חזרה", key="gantt_back_late"):
         st.rerun()
-    st.markdown('<div style="direction:rtl;font-size:18px;font-weight:900;color:#00c9be;padding:4px 0;">📅 גאנט עובדים</div>', unsafe_allow_html=True)
+    _smsg = st.session_state.pop("_gantt_swap_msg", "")
+    if _smsg:
+        _color = "#00c9be" if "✅" in _smsg else "#ef4444"
+        st.markdown(f'<div style="color:{_color};font-weight:800;font-size:14px;">{_smsg}</div>', unsafe_allow_html=True)
+    st.markdown('<div style="direction:rtl;font-size:18px;font-weight:900;color:#00c9be;padding:4px 0 8px;">📅 גאנט עובדים</div>', unsafe_allow_html=True)
 
     _sched  = st.session_state["schedule_df"]
     _timed2 = _sched[_sched["התחלה"].astype(str).str.strip() != ""].copy()
-
     _RCOL = {
         "ראש צוות": "#8e24aa", "דיילת": "#1d6fa8", "דייל": "#1d6fa8",
         "מתאם תורים": "#d97706", "מפקח TSA": "#dc2626",
         "שומר TSA": "#16a34a", 'טרייני ר"צ': "#b45309", "טרייני רצ": "#b45309",
     }
-    _base2 = pd.Timestamp("2000-01-01")
-    _rows2 = []
+    _base2  = pd.Timestamp("2000-01-01")
+    _rows2  = []
     for _, _r2 in _timed2.iterrows():
         _w2 = str(_r2.get("עובד", ""))
         if "❌" in _w2 or not _w2.strip() or _w2 == "nan":
@@ -1872,45 +1875,95 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
             _e2 = _base2 + pd.Timedelta(hours=_eh2, minutes=_em2)
             if _e2 <= _s2:
                 _e2 += pd.Timedelta(days=1)
-            _s_str = str(_r2.get("התחלה",""))
-            _e_str = str(_r2.get("סיום",""))
             _rows2.append({
                 "עובד": _w2, "התחלה_dt": _s2, "סיום_dt": _e2,
+                "mid_dt": _s2 + (_e2 - _s2)/2,
                 "תפקיד": normalize_role_label(str(_r2.get("תפקיד בסיס",""))),
                 "טיסה":  str(_r2.get("טיסה","")).replace("LY","").strip(),
-                "זמן": f"{_s_str}–{_e_str}",
+                "זמן":   f"{_r2.get('התחלה','')}–{_r2.get('סיום','')}",
             })
         except Exception:
             pass
 
     if _rows2:
         import altair as _alt2
-        _df2   = pd.DataFrame(_rows2)
-        _wsort = sorted(_df2["עובד"].unique().tolist())
-        _chart2 = _alt2.Chart(_df2).mark_bar(
-            cornerRadiusTopLeft=3, cornerRadiusTopRight=3,
-            cornerRadiusBottomLeft=3, cornerRadiusBottomRight=3,
-        ).encode(
-            x=_alt2.X("התחלה_dt:T", title=None,
-                       axis=_alt2.Axis(format="%H:%M", labelFontSize=11)),
+        _df2    = pd.DataFrame(_rows2)
+        _wsort2 = sorted(_df2["עובד"].unique().tolist())
+        _sel2   = _alt2.selection_point(fields=["עובד","טיסה"], on="click", clear="dblclick")
+
+        _stripe2 = _alt2.Chart(pd.DataFrame([
+            {"עובד": w, "x0": _base2, "x1": _base2 + pd.Timedelta(days=2)}
+            for i,w in enumerate(_wsort2) if i%2==0
+        ])).mark_rect(color="#f0f4fa", opacity=0.4).encode(
+            x=_alt2.X("x0:T"), x2="x1:T",
+            y=_alt2.Y("עובד:N", sort=_wsort2),
+        ) if _wsort2 else _alt2.Chart(pd.DataFrame()).mark_point()
+
+        _bars2 = _alt2.Chart(_df2).mark_bar(height=20, cornerRadius=4).encode(
+            x=_alt2.X("התחלה_dt:T", title=None, axis=_alt2.Axis(
+                format="%H:%M", labelFontSize=12, grid=True,
+                gridColor="#cdd8ea", tickCount=24, labelAngle=0)),
             x2="סיום_dt:T",
-            y=_alt2.Y("עובד:N", title=None, sort=_wsort,
-                       axis=_alt2.Axis(labelFontSize=11)),
-            color=_alt2.Color(
-                "תפקיד:N",
-                scale=_alt2.Scale(domain=list(_RCOL.keys()), range=list(_RCOL.values())),
-                legend=_alt2.Legend(title=None, orient="top", labelFontSize=11),
-            ),
-            tooltip=[
-                _alt2.Tooltip("עובד:N", title="עובד"),
-                _alt2.Tooltip("תפקיד:N", title="תפקיד"),
-                _alt2.Tooltip("טיסה:N", title="טיסה"),
-                _alt2.Tooltip("זמן:N", title="שעות"),
-            ],
-        ).properties(height=_alt2.Step(26)).configure_view(strokeWidth=0).configure_axis(
-            grid=True, gridColor="#1e3a5f", labelColor="#c8d8ec",
-        ).configure_legend(labelColor="#c8d8ec")
-        st.altair_chart(_chart2, use_container_width=True)
+            y=_alt2.Y("עובד:N", sort=_wsort2, title=None, axis=_alt2.Axis(
+                labelFontSize=13, labelFontWeight="bold",
+                labelColor="#071b3a", grid=True, gridColor="#dde6f0")),
+            color=_alt2.Color("תפקיד:N", scale=_alt2.Scale(
+                domain=list(_RCOL.keys()), range=list(_RCOL.values())),
+                legend=_alt2.Legend(title=None, orient="top", labelFontSize=12)),
+            opacity=_alt2.condition(_sel2, _alt2.value(1.0), _alt2.value(0.82)),
+            stroke=_alt2.condition(_sel2, _alt2.value("#000"), _alt2.value(None)),
+            strokeWidth=_alt2.condition(_sel2, _alt2.value(2.5), _alt2.value(0)),
+            tooltip=[_alt2.Tooltip("עובד:N"), _alt2.Tooltip("תפקיד:N"),
+                     _alt2.Tooltip("טיסה:N"), _alt2.Tooltip("זמן:N")],
+        ).add_params(_sel2)
+
+        _lbl2 = _alt2.Chart(_df2).mark_text(
+            fontSize=9, fontWeight="bold", color="white",
+            baseline="middle", align="center",
+        ).encode(
+            x=_alt2.X("mid_dt:T"), y=_alt2.Y("עובד:N", sort=_wsort2),
+            text=_alt2.Text("טיסה:N"),
+        )
+
+        _chart2 = (_stripe2 + _bars2 + _lbl2).properties(
+            height=_alt2.Step(30),
+        ).configure_view(stroke="#cdd8ea", strokeWidth=1).configure_axis(domainColor="#cdd8ea")
+
+        try:
+            _ev2 = st.altair_chart(_chart2, use_container_width=True, on_select="rerun")
+            _pts2 = (_ev2.selection or {}).get("point", [])
+        except TypeError:
+            st.altair_chart(_chart2, use_container_width=True)
+            _pts2 = []
+
+        if _pts2:
+            _sw2 = str(_pts2[0].get("עובד",""))
+            _sf2 = str(_pts2[0].get("טיסה",""))
+            if _sw2 and _sf2:
+                st.markdown(
+                    f'<div style="direction:rtl;background:#eef5ff;border-right:4px solid #3b82f6;'
+                    f'border-radius:8px;padding:8px 14px;font-size:14px;margin:6px 0;">'
+                    f'✏️ נבחר: <strong>{safe_html(_sw2)}</strong> — טיסה <strong>{safe_html(_sf2)}</strong></div>',
+                    unsafe_allow_html=True)
+                _all_w2 = sorted(set(
+                    str(w) for w in _sched["עובד"].dropna()
+                    if "❌" not in str(w) and str(w).strip() not in ("","nan")
+                ))
+                _nw2 = st.selectbox("🔄 העבר לעובד:", _all_w2,
+                                     index=_all_w2.index(_sw2) if _sw2 in _all_w2 else 0,
+                                     key="gantt_fp_swap_target")
+                if st.button("✅ בצע החלפה", key="gantt_fp_do_swap", disabled=(_nw2==_sw2)):
+                    _mk2 = (
+                        (st.session_state["schedule_df"]["עובד"] == _sw2) &
+                        (st.session_state["schedule_df"]["טיסה"].astype(str)
+                         .str.replace("LY","").str.strip() == _sf2)
+                    )
+                    if _mk2.any():
+                        st.session_state["schedule_df"].loc[_mk2, "עובד"] = _nw2
+                        st.success(f"✅ הועבר מ-{_sw2} ל-{_nw2}")
+                        st.rerun()
+        else:
+            st.caption("💡 לחץ על בר כדי להחליף עובד")
     else:
         st.info("אין נתונים להצגה")
     st.stop()
@@ -2119,10 +2172,10 @@ if "schedule_df" in st.session_state:
                         _e_dt = _base + pd.Timedelta(hours=_eh, minutes=_em)
                         if _e_dt <= _s_dt:
                             _e_dt += pd.Timedelta(days=1)
+                        _mid  = _s_dt + (_e_dt - _s_dt) / 2
                         _rows.append({
-                            "עובד": _w, "התחלה_dt": _s_dt, "סיום_dt": _e_dt,
-                            "תפקיד": _role, "טיסה": _fl,
-                            "זמן": f"{_s}–{_e}",
+                            "עובד": _w, "התחלה_dt": _s_dt, "סיום_dt": _e_dt, "mid_dt": _mid,
+                            "תפקיד": _role, "טיסה": _fl, "זמן": f"{_s}–{_e}",
                         })
                     except Exception:
                         pass
@@ -2132,43 +2185,114 @@ if "schedule_df" in st.session_state:
                 else:
                     import altair as _alt
                     _df_g = pd.DataFrame(_rows)
-                    _workers_sorted = sorted(_df_g["עובד"].unique().tolist())
-                    _color_domain = list(ROLE_COLORS_G.keys())
-                    _color_range  = list(ROLE_COLORS_G.values())
+                    _wsorted = sorted(_df_g["עובד"].unique().tolist())
 
-                    _chart = _alt.Chart(_df_g).mark_bar(
-                        cornerRadiusTopLeft=3, cornerRadiusTopRight=3,
-                        cornerRadiusBottomLeft=3, cornerRadiusBottomRight=3,
+                    _sel = _alt.selection_point(fields=["עובד", "טיסה"], on="click", clear="dblclick")
+
+                    # ── שכבת פסים (zebra stripes) ────────────────────────────
+                    _stripe_df = pd.DataFrame([
+                        {"עובד": w, "x0": _base, "x1": _base + pd.Timedelta(days=2)}
+                        for i, w in enumerate(_wsorted) if i % 2 == 0
+                    ])
+                    _stripes = _alt.Chart(_stripe_df).mark_rect(
+                        color="#f0f4fa", opacity=0.4,
                     ).encode(
-                        x=_alt.X("התחלה_dt:T", title=None,
-                                  axis=_alt.Axis(format="%H:%M", labelFontSize=11)),
+                        x=_alt.X("x0:T", title=None),
+                        x2="x1:T",
+                        y=_alt.Y("עובד:N", sort=_wsorted, title=None),
+                    ) if len(_stripe_df) else _alt.Chart(pd.DataFrame()).mark_point()
+
+                    # ── בארים ────────────────────────────────────────────────
+                    _bars = _alt.Chart(_df_g).mark_bar(
+                        height=20, cornerRadius=4,
+                    ).encode(
+                        x=_alt.X("התחלה_dt:T", title=None, axis=_alt.Axis(
+                            format="%H:%M", labelFontSize=12, grid=True,
+                            gridColor="#cdd8ea", gridWidth=1, tickCount=24,
+                            labelAngle=0,
+                        )),
                         x2="סיום_dt:T",
-                        y=_alt.Y("עובד:N", title=None,
-                                  sort=_workers_sorted,
-                                  axis=_alt.Axis(labelFontSize=11)),
+                        y=_alt.Y("עובד:N", sort=_wsorted, title=None, axis=_alt.Axis(
+                            labelFontSize=13, labelFontWeight="bold",
+                            labelColor="#071b3a", grid=True, gridColor="#dde6f0",
+                        )),
                         color=_alt.Color(
                             "תפקיד:N",
-                            scale=_alt.Scale(domain=_color_domain, range=_color_range),
-                            legend=_alt.Legend(title=None, orient="top", labelFontSize=11),
+                            scale=_alt.Scale(
+                                domain=list(ROLE_COLORS_G.keys()),
+                                range=list(ROLE_COLORS_G.values()),
+                            ),
+                            legend=_alt.Legend(title=None, orient="top",
+                                              labelFontSize=12, symbolSize=120),
                         ),
+                        opacity=_alt.condition(_sel, _alt.value(1.0), _alt.value(0.82)),
+                        stroke=_alt.condition(_sel, _alt.value("#000"), _alt.value(None)),
+                        strokeWidth=_alt.condition(_sel, _alt.value(2.5), _alt.value(0)),
                         tooltip=[
-                            _alt.Tooltip("עובד:N",    title="עובד"),
-                            _alt.Tooltip("תפקיד:N",   title="תפקיד"),
-                            _alt.Tooltip("טיסה:N",    title="טיסה"),
-                            _alt.Tooltip("זמן:N",     title="שעות"),
+                            _alt.Tooltip("עובד:N",  title="עובד"),
+                            _alt.Tooltip("תפקיד:N", title="תפקיד"),
+                            _alt.Tooltip("טיסה:N",  title="טיסה"),
+                            _alt.Tooltip("זמן:N",   title="שעות"),
                         ],
-                    ).properties(
-                        height=_alt.Step(26),
-                    ).configure_view(
-                        strokeWidth=0,
-                    ).configure_axis(
-                        grid=True, gridColor="#1e3a5f",
-                        labelColor="#c8d8ec", titleColor="#c8d8ec",
-                    ).configure_legend(
-                        labelColor="#c8d8ec",
+                    ).add_params(_sel)
+
+                    # ── תוויות טיסה על הבארים ────────────────────────────────
+                    _labels = _alt.Chart(_df_g).mark_text(
+                        fontSize=9, fontWeight="bold", color="white",
+                        baseline="middle", align="center",
+                    ).encode(
+                        x=_alt.X("mid_dt:T", title=None),
+                        y=_alt.Y("עובד:N", sort=_wsorted, title=None),
+                        text=_alt.Text("טיסה:N"),
                     )
 
-                    st.altair_chart(_chart, use_container_width=True)
+                    _chart = (_stripes + _bars + _labels).properties(
+                        height=_alt.Step(30),
+                    ).configure_view(
+                        stroke="#cdd8ea", strokeWidth=1,
+                    ).configure_axis(
+                        domainColor="#cdd8ea",
+                    )
+
+                    # ── הצגה עם on_select (Streamlit ≥1.27) ─────────────────
+                    try:
+                        _ev = st.altair_chart(_chart, use_container_width=True, on_select="rerun")
+                        _pts = (_ev.selection or {}).get("point", [])
+                    except TypeError:
+                        st.altair_chart(_chart, use_container_width=True)
+                        _pts = []
+
+                    # ── ממשק החלפת עובד ──────────────────────────────────────
+                    if _pts:
+                        _sw = str(_pts[0].get("עובד", ""))
+                        _sf = str(_pts[0].get("טיסה", ""))
+                        if _sw and _sf:
+                            st.markdown(
+                                f'<div style="direction:rtl;background:#eef5ff;border-right:4px solid #3b82f6;'
+                                f'border-radius:8px;padding:8px 14px;font-size:14px;margin:6px 0;">'
+                                f'✏️ נבחר: <strong>{safe_html(_sw)}</strong> — טיסה <strong>{safe_html(_sf)}</strong></div>',
+                                unsafe_allow_html=True,
+                            )
+                            _all_w = sorted(set(
+                                str(w) for w in _sched["עובד"].dropna()
+                                if "❌" not in str(w) and str(w).strip() not in ("", "nan")
+                            ))
+                            _new_w = st.selectbox("🔄 העבר למשימה לעובד:", _all_w,
+                                                  index=_all_w.index(_sw) if _sw in _all_w else 0,
+                                                  key="gantt_swap_target")
+                            if st.button("✅ בצע החלפה", key="gantt_do_swap",
+                                         disabled=(_new_w == _sw)):
+                                _mask = (
+                                    (st.session_state["schedule_df"]["עובד"] == _sw) &
+                                    (st.session_state["schedule_df"]["טיסה"].astype(str)
+                                     .str.replace("LY", "").str.strip() == _sf)
+                                )
+                                if _mask.any():
+                                    st.session_state["schedule_df"].loc[_mask, "עובד"] = _new_w
+                                    st.success(f"✅ הועבר מ-{_sw} ל-{_new_w}")
+                                    st.rerun()
+                    else:
+                        st.caption("💡 לחץ על בר כדי להחליף עובד")
 
         # ── Tab: פנויים באולם ─────────────────────────────────────────────────
         with tab_available:
