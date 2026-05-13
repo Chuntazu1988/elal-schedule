@@ -1847,78 +1847,72 @@ try{{
 # ── גאנט: רנדור אחרי הגדרת הפונקציה ──────────────────────────────────────
 if _goto_gantt_early and "schedule_df" in st.session_state:
     st.session_state.pop("show_gantt_page", None)
-    _bc, _tc = st.columns([1, 9])
-    with _bc:
-        if st.button("← חזרה", key="gantt_back_late"):
-            st.rerun()
-    with _tc:
-        _smsg = st.session_state.pop("_gantt_swap_msg", "")
-        if _smsg:
-            _color = "#00c9be" if "✅" in _smsg else "#ef4444"
-            st.markdown(f'<div style="color:{_color};font-weight:800;font-size:14px;padding:4px 0;">{_smsg}</div>', unsafe_allow_html=True)
-        else:
-            st.markdown('<div style="direction:rtl;font-size:18px;font-weight:900;color:#00c9be;padding:6px 0;">📅 גאנט עובדים</div>', unsafe_allow_html=True)
+    if st.button("← חזרה", key="gantt_back_late"):
+        st.rerun()
+    st.markdown('<div style="direction:rtl;font-size:18px;font-weight:900;color:#00c9be;padding:4px 0;">📅 גאנט עובדים</div>', unsafe_allow_html=True)
 
     _sched  = st.session_state["schedule_df"]
     _timed2 = _sched[_sched["התחלה"].astype(str).str.strip() != ""].copy()
 
-    if _timed2.empty:
-        st.info("אין נתוני שיבוץ להצגה")
-    else:
-        _RCOL = {
-            "ראש צוות": "#8e24aa", "דיילת": "#1d6fa8", "דייל": "#1d6fa8",
-            "מתאם תורים": "#d97706", "מפקח TSA": "#dc2626",
-            "שומר TSA": "#16a34a", 'טרייני ר"צ': "#b45309", "טרייני רצ": "#b45309",
-        }
-        _base2 = pd.Timestamp("2000-01-01")
-        _rows2 = []
-        for _, _r2 in _timed2.iterrows():
-            _w2 = str(_r2.get("עובד", ""))
-            if "❌" in _w2 or not _w2.strip() or _w2 == "nan":
-                continue
-            try:
-                _sh2, _sm2 = map(int, str(_r2.get("התחלה","")).split(":"))
-                _eh2, _em2 = map(int, str(_r2.get("סיום","")).split(":"))
-                _s2 = _base2 + pd.Timedelta(hours=_sh2, minutes=_sm2)
-                _e2 = _base2 + pd.Timedelta(hours=_eh2, minutes=_em2)
-                if _e2 <= _s2:
-                    _e2 += pd.Timedelta(days=1)
-                _rows2.append({
-                    "עובד": _w2, "Start": _s2, "Finish": _e2,
-                    "תפקיד": normalize_role_label(str(_r2.get("תפקיד בסיס",""))),
-                    "טיסה":  str(_r2.get("טיסה","")).replace("LY","").strip(),
-                })
-            except Exception:
-                pass
+    _RCOL = {
+        "ראש צוות": "#8e24aa", "דיילת": "#1d6fa8", "דייל": "#1d6fa8",
+        "מתאם תורים": "#d97706", "מפקח TSA": "#dc2626",
+        "שומר TSA": "#16a34a", 'טרייני ר"צ': "#b45309", "טרייני רצ": "#b45309",
+    }
+    _base2 = pd.Timestamp("2000-01-01")
+    _rows2 = []
+    for _, _r2 in _timed2.iterrows():
+        _w2 = str(_r2.get("עובד", ""))
+        if "❌" in _w2 or not _w2.strip() or _w2 == "nan":
+            continue
+        try:
+            _sh2, _sm2 = map(int, str(_r2.get("התחלה","")).split(":"))
+            _eh2, _em2 = map(int, str(_r2.get("סיום","")).split(":"))
+            _s2 = _base2 + pd.Timedelta(hours=_sh2, minutes=_sm2)
+            _e2 = _base2 + pd.Timedelta(hours=_eh2, minutes=_em2)
+            if _e2 <= _s2:
+                _e2 += pd.Timedelta(days=1)
+            _s_str = str(_r2.get("התחלה",""))
+            _e_str = str(_r2.get("סיום",""))
+            _rows2.append({
+                "עובד": _w2, "התחלה_dt": _s2, "סיום_dt": _e2,
+                "תפקיד": normalize_role_label(str(_r2.get("תפקיד בסיס",""))),
+                "טיסה":  str(_r2.get("טיסה","")).replace("LY","").strip(),
+                "זמן": f"{_s_str}–{_e_str}",
+            })
+        except Exception:
+            pass
 
-        if _rows2:
-            import plotly.express as _px2
-            _df2   = pd.DataFrame(_rows2)
-            _wsort = sorted(_df2["עובד"].unique().tolist())
-            _fig2  = _px2.timeline(
-                _df2,
-                x_start="Start", x_end="Finish",
-                y="עובד", color="תפקיד", text="טיסה",
-                color_discrete_map=_RCOL,
-                category_orders={"עובד": _wsort},
-                hover_data={"Start":"|%H:%M","Finish":"|%H:%M","תפקיד":True,"עובד":False},
-            )
-            _fig2.update_layout(
-                height=max(600, len(_wsort) * 30 + 120),
-                paper_bgcolor="#04080f", plot_bgcolor="#060e1c",
-                font=dict(color="#c8d8ec", size=11),
-                margin=dict(l=5, r=5, t=40, b=10),
-                xaxis=dict(tickformat="%H:%M", gridcolor="#0d3050", title=None),
-                yaxis=dict(title=None, gridcolor="#0d3050", autorange="reversed"),
-                legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="right", x=1),
-            )
-            _fig2.update_traces(
-                textposition="inside", insidetextanchor="middle",
-                textfont=dict(size=9, color="white"),
-            )
-            st.plotly_chart(_fig2, use_container_width=True)
-        else:
-            st.info("אין נתונים להצגה")
+    if _rows2:
+        import altair as _alt2
+        _df2   = pd.DataFrame(_rows2)
+        _wsort = sorted(_df2["עובד"].unique().tolist())
+        _chart2 = _alt2.Chart(_df2).mark_bar(
+            cornerRadiusTopLeft=3, cornerRadiusTopRight=3,
+            cornerRadiusBottomLeft=3, cornerRadiusBottomRight=3,
+        ).encode(
+            x=_alt2.X("התחלה_dt:T", title=None,
+                       axis=_alt2.Axis(format="%H:%M", labelFontSize=11)),
+            x2="סיום_dt:T",
+            y=_alt2.Y("עובד:N", title=None, sort=_wsort,
+                       axis=_alt2.Axis(labelFontSize=11)),
+            color=_alt2.Color(
+                "תפקיד:N",
+                scale=_alt2.Scale(domain=list(_RCOL.keys()), range=list(_RCOL.values())),
+                legend=_alt2.Legend(title=None, orient="top", labelFontSize=11),
+            ),
+            tooltip=[
+                _alt2.Tooltip("עובד:N", title="עובד"),
+                _alt2.Tooltip("תפקיד:N", title="תפקיד"),
+                _alt2.Tooltip("טיסה:N", title="טיסה"),
+                _alt2.Tooltip("זמן:N", title="שעות"),
+            ],
+        ).properties(height=_alt2.Step(26)).configure_view(strokeWidth=0).configure_axis(
+            grid=True, gridColor="#1e3a5f", labelColor="#c8d8ec",
+        ).configure_legend(labelColor="#c8d8ec")
+        st.altair_chart(_chart2, use_container_width=True)
+    else:
+        st.info("אין נתונים להצגה")
     st.stop()
 
 
@@ -2123,11 +2117,12 @@ if "schedule_df" in st.session_state:
                         _eh, _em = map(int, _e.split(":"))
                         _s_dt = _base + pd.Timedelta(hours=_sh, minutes=_sm)
                         _e_dt = _base + pd.Timedelta(hours=_eh, minutes=_em)
-                        if _e_dt <= _s_dt:          # overnight — crosses midnight
+                        if _e_dt <= _s_dt:
                             _e_dt += pd.Timedelta(days=1)
                         _rows.append({
-                            "עובד": _w, "Start": _s_dt, "Finish": _e_dt,
+                            "עובד": _w, "התחלה_dt": _s_dt, "סיום_dt": _e_dt,
                             "תפקיד": _role, "טיסה": _fl,
+                            "זמן": f"{_s}–{_e}",
                         })
                     except Exception:
                         pass
@@ -2135,43 +2130,45 @@ if "schedule_df" in st.session_state:
                 if not _rows:
                     st.info("אין נתונים להצגה בגאנט")
                 else:
-                    import plotly.express as _px
+                    import altair as _alt
                     _df_g = pd.DataFrame(_rows)
                     _workers_sorted = sorted(_df_g["עובד"].unique().tolist())
-                    _fig = _px.timeline(
-                        _df_g,
-                        x_start="Start", x_end="Finish",
-                        y="עובד", color="תפקיד", text="טיסה",
-                        color_discrete_map=ROLE_COLORS_G,
-                        category_orders={"עובד": _workers_sorted},
-                        hover_data={"Start": "|%H:%M", "Finish": "|%H:%M",
-                                    "תפקיד": True, "עובד": False},
-                    )
-                    _fig.update_layout(
-                        height=max(500, len(_workers_sorted) * 30 + 120),
-                        paper_bgcolor="#04080f",
-                        plot_bgcolor="#060e1c",
-                        font=dict(color="#c8d8ec", size=11),
-                        margin=dict(l=5, r=5, t=40, b=10),
-                        xaxis=dict(
-                            tickformat="%H:%M", gridcolor="#0d3050",
-                            title=None, tickfont=dict(size=10),
+                    _color_domain = list(ROLE_COLORS_G.keys())
+                    _color_range  = list(ROLE_COLORS_G.values())
+
+                    _chart = _alt.Chart(_df_g).mark_bar(
+                        cornerRadiusTopLeft=3, cornerRadiusTopRight=3,
+                        cornerRadiusBottomLeft=3, cornerRadiusBottomRight=3,
+                    ).encode(
+                        x=_alt.X("התחלה_dt:T", title=None,
+                                  axis=_alt.Axis(format="%H:%M", labelFontSize=11)),
+                        x2="סיום_dt:T",
+                        y=_alt.Y("עובד:N", title=None,
+                                  sort=_workers_sorted,
+                                  axis=_alt.Axis(labelFontSize=11)),
+                        color=_alt.Color(
+                            "תפקיד:N",
+                            scale=_alt.Scale(domain=_color_domain, range=_color_range),
+                            legend=_alt.Legend(title=None, orient="top", labelFontSize=11),
                         ),
-                        yaxis=dict(
-                            title=None, gridcolor="#0d3050",
-                            autorange="reversed", tickfont=dict(size=10),
-                        ),
-                        legend=dict(
-                            orientation="h", yanchor="bottom",
-                            y=1.01, xanchor="right", x=1,
-                            font=dict(size=10),
-                        ),
+                        tooltip=[
+                            _alt.Tooltip("עובד:N",    title="עובד"),
+                            _alt.Tooltip("תפקיד:N",   title="תפקיד"),
+                            _alt.Tooltip("טיסה:N",    title="טיסה"),
+                            _alt.Tooltip("זמן:N",     title="שעות"),
+                        ],
+                    ).properties(
+                        height=_alt.Step(26),
+                    ).configure_view(
+                        strokeWidth=0,
+                    ).configure_axis(
+                        grid=True, gridColor="#1e3a5f",
+                        labelColor="#c8d8ec", titleColor="#c8d8ec",
+                    ).configure_legend(
+                        labelColor="#c8d8ec",
                     )
-                    _fig.update_traces(
-                        textposition="inside", insidetextanchor="middle",
-                        textfont=dict(size=9, color="white"),
-                    )
-                    st.plotly_chart(_fig, use_container_width=True)
+
+                    st.altair_chart(_chart, use_container_width=True)
 
         # ── Tab: פנויים באולם ─────────────────────────────────────────────────
         with tab_available:
