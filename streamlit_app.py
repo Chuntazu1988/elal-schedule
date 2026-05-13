@@ -1891,19 +1891,24 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
         _wsort2 = sorted(_df2["עובד"].unique().tolist())
         _sel2   = _alt2.selection_point(fields=["עובד","טיסה"], on="click", clear="dblclick")
 
+        _xmin2  = _df2["התחלה_dt"].min() - pd.Timedelta(minutes=30)
+        _xmax2  = _df2["סיום_dt"].max()  + pd.Timedelta(minutes=30)
+
         _stripe2 = _alt2.Chart(pd.DataFrame([
-            {"עובד": w, "x0": _base2, "x1": _base2 + pd.Timedelta(days=2)}
+            {"עובד": w, "x0": _xmin2, "x1": _xmax2}
             for i,w in enumerate(_wsort2) if i%2==0
-        ])).mark_rect(color="#f0f4fa", opacity=0.4).encode(
+        ])).mark_rect(color="#e8f0fb", opacity=0.5).encode(
             x=_alt2.X("x0:T"), x2="x1:T",
             y=_alt2.Y("עובד:N", sort=_wsort2),
         ) if _wsort2 else _alt2.Chart(pd.DataFrame()).mark_point()
 
-        _bars2 = _alt2.Chart(_df2).mark_bar(height=20, cornerRadius=4).encode(
-            x=_alt2.X("התחלה_dt:T", title=None, axis=_alt2.Axis(
-                format="%H:%M", labelFontSize=12, grid=True,
-                gridColor="#cdd8ea", tickCount=24, labelAngle=0)),
-            x2="סיום_dt:T",
+        _x2enc = _alt2.X("התחלה_dt:T", title=None,
+            scale=_alt2.Scale(domain=[_xmin2.isoformat(), _xmax2.isoformat()]),
+            axis=_alt2.Axis(orient="top", format="%H:%M", labelFontSize=12,
+                grid=True, gridColor="#cdd8ea", tickCount=24, labelAngle=0))
+
+        _bars2 = _alt2.Chart(_df2).mark_bar(height=28, cornerRadius=5).encode(
+            x=_x2enc, x2=_alt2.X2("סיום_dt:T"),
             y=_alt2.Y("עובד:N", sort=_wsort2, title=None, axis=_alt2.Axis(
                 labelFontSize=13, labelFontWeight="bold",
                 labelColor="#071b3a", grid=True, gridColor="#dde6f0")),
@@ -1911,22 +1916,24 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
                 domain=list(_RCOL.keys()), range=list(_RCOL.values())),
                 legend=_alt2.Legend(title=None, orient="top", labelFontSize=12)),
             opacity=_alt2.condition(_sel2, _alt2.value(1.0), _alt2.value(0.82)),
-            stroke=_alt2.condition(_sel2, _alt2.value("#000"), _alt2.value(None)),
+            stroke=_alt2.condition(_sel2, _alt2.value("#222"), _alt2.value(None)),
             strokeWidth=_alt2.condition(_sel2, _alt2.value(2.5), _alt2.value(0)),
             tooltip=[_alt2.Tooltip("עובד:N"), _alt2.Tooltip("תפקיד:N"),
                      _alt2.Tooltip("טיסה:N"), _alt2.Tooltip("זמן:N")],
         ).add_params(_sel2)
 
         _lbl2 = _alt2.Chart(_df2).mark_text(
-            fontSize=9, fontWeight="bold", color="white",
+            fontSize=10, fontWeight="bold", color="white",
             baseline="middle", align="center",
         ).encode(
-            x=_alt2.X("mid_dt:T"), y=_alt2.Y("עובד:N", sort=_wsort2),
+            x=_alt2.X("mid_dt:T",
+                scale=_alt2.Scale(domain=[_xmin2.isoformat(), _xmax2.isoformat()])),
+            y=_alt2.Y("עובד:N", sort=_wsort2),
             text=_alt2.Text("טיסה:N"),
         )
 
         _chart2 = (_stripe2 + _bars2 + _lbl2).properties(
-            height=_alt2.Step(30),
+            height=_alt2.Step(38),
         ).configure_view(stroke="#cdd8ea", strokeWidth=1).configure_axis(domainColor="#cdd8ea")
 
         try:
@@ -2185,33 +2192,44 @@ if "schedule_df" in st.session_state:
                 else:
                     import altair as _alt
                     _df_g = pd.DataFrame(_rows)
+                    # רק עובדים עם לפחות משימה אחת
                     _wsorted = sorted(_df_g["עובד"].unique().tolist())
+
+                    # טווח זמן מהתחלה עד סוף הסידור (לא ממחצות)
+                    _x_min = _df_g["התחלה_dt"].min() - pd.Timedelta(minutes=30)
+                    _x_max = _df_g["סיום_dt"].max()  + pd.Timedelta(minutes=30)
 
                     _sel = _alt.selection_point(fields=["עובד", "טיסה"], on="click", clear="dblclick")
 
-                    # ── שכבת פסים (zebra stripes) ────────────────────────────
+                    # ── פסים בגובה כל הטווח בלבד (לא כל היממה) ──────────────
                     _stripe_df = pd.DataFrame([
-                        {"עובד": w, "x0": _base, "x1": _base + pd.Timedelta(days=2)}
+                        {"עובד": w, "x0": _x_min, "x1": _x_max}
                         for i, w in enumerate(_wsorted) if i % 2 == 0
                     ])
                     _stripes = _alt.Chart(_stripe_df).mark_rect(
-                        color="#f0f4fa", opacity=0.4,
+                        color="#e8f0fb", opacity=0.5,
                     ).encode(
                         x=_alt.X("x0:T", title=None),
                         x2="x1:T",
                         y=_alt.Y("עובד:N", sort=_wsorted, title=None),
                     ) if len(_stripe_df) else _alt.Chart(pd.DataFrame()).mark_point()
 
-                    # ── בארים ────────────────────────────────────────────────
-                    _bars = _alt.Chart(_df_g).mark_bar(
-                        height=20, cornerRadius=4,
-                    ).encode(
-                        x=_alt.X("התחלה_dt:T", title=None, axis=_alt.Axis(
+                    # ── ציר X משותף: למעלה ──────────────────────────────────
+                    _x_enc = _alt.X("התחלה_dt:T", title=None,
+                        scale=_alt.Scale(domain=[_x_min.isoformat(), _x_max.isoformat()]),
+                        axis=_alt.Axis(
+                            orient="top",
                             format="%H:%M", labelFontSize=12, grid=True,
                             gridColor="#cdd8ea", gridWidth=1, tickCount=24,
                             labelAngle=0,
-                        )),
-                        x2="סיום_dt:T",
+                        ))
+
+                    # ── בארים ────────────────────────────────────────────────
+                    _bars = _alt.Chart(_df_g).mark_bar(
+                        height=28, cornerRadius=5,
+                    ).encode(
+                        x=_x_enc,
+                        x2=_alt.X2("סיום_dt:T"),
                         y=_alt.Y("עובד:N", sort=_wsorted, title=None, axis=_alt.Axis(
                             labelFontSize=13, labelFontWeight="bold",
                             labelColor="#071b3a", grid=True, gridColor="#dde6f0",
@@ -2226,7 +2244,7 @@ if "schedule_df" in st.session_state:
                                               labelFontSize=12, symbolSize=120),
                         ),
                         opacity=_alt.condition(_sel, _alt.value(1.0), _alt.value(0.82)),
-                        stroke=_alt.condition(_sel, _alt.value("#000"), _alt.value(None)),
+                        stroke=_alt.condition(_sel, _alt.value("#222"), _alt.value(None)),
                         strokeWidth=_alt.condition(_sel, _alt.value(2.5), _alt.value(0)),
                         tooltip=[
                             _alt.Tooltip("עובד:N",  title="עובד"),
@@ -2238,16 +2256,17 @@ if "schedule_df" in st.session_state:
 
                     # ── תוויות טיסה על הבארים ────────────────────────────────
                     _labels = _alt.Chart(_df_g).mark_text(
-                        fontSize=9, fontWeight="bold", color="white",
+                        fontSize=10, fontWeight="bold", color="white",
                         baseline="middle", align="center",
                     ).encode(
-                        x=_alt.X("mid_dt:T", title=None),
+                        x=_alt.X("mid_dt:T",
+                            scale=_alt.Scale(domain=[_x_min.isoformat(), _x_max.isoformat()])),
                         y=_alt.Y("עובד:N", sort=_wsorted, title=None),
                         text=_alt.Text("טיסה:N"),
                     )
 
                     _chart = (_stripes + _bars + _labels).properties(
-                        height=_alt.Step(30),
+                        height=_alt.Step(38),
                     ).configure_view(
                         stroke="#cdd8ea", strokeWidth=1,
                     ).configure_axis(
