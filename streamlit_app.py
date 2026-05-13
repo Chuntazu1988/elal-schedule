@@ -2084,3 +2084,4 @@ if "schedule_df" in st.session_state:
     except Exception as exc:
         st.error("הייתה שגיאה בהצגת השיבוץ.")
         st.exception(exc)
+st.warning("DEV SERVER")
