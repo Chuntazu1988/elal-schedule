@@ -1531,17 +1531,17 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
 <title>גאנט עובדים</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-html,body{{background:#04080f;color:#c8d8ec;
-  font-family:"Segoe UI",Arial,sans-serif;}}
+html,body{{height:100%;background:#04080f;color:#c8d8ec;
+  font-family:"Segoe UI",Arial,sans-serif;overflow:hidden;display:flex;flex-direction:column}}
 /* ── top bar ── */
-#bar{{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:8px;padding:5px 10px;
+#bar{{flex-shrink:0;display:flex;align-items:center;gap:8px;padding:5px 10px;
   background:#060e1c;border-bottom:1px solid #0d3050;direction:ltr}}
 .nav-btn{{background:#0d1f30;color:#00c9be;border:1px solid rgba(0,201,190,.35);
   border-radius:8px;padding:4px 14px;font-size:13px;font-weight:800;cursor:pointer}}
 .nav-btn:active{{opacity:.7}}
 #time-lbl{{font-size:12px;color:#64748b;min-width:110px;text-align:center}}
 /* ── scroll container ── */
-#outer{{overflow-x:auto;overflow-y:visible;}}
+#outer{{flex:1;overflow:auto;min-height:0}}
 /* ── sticky header row ── */
 .hdr{{display:flex;position:sticky;top:0;z-index:20;
   background:#060e1c;border-bottom:2px solid #0d3050}}
@@ -1572,7 +1572,7 @@ html,body{{background:#04080f;color:#c8d8ec;
 .task.departed{{opacity:.45;filter:saturate(.3)}}
 .task.overlap{{border-color:#ef4444!important}}
 /* ── tray ── */
-#tray{{background:#060e1c;border-top:2px solid #0d3050;
+#tray{{flex-shrink:0;background:#060e1c;border-top:2px solid #0d3050;
   padding:6px 10px;max-height:60px;overflow-x:auto;display:none;direction:ltr}}
 #tray-inner{{display:flex;gap:6px;align-items:center}}
 .tc{{background:#1e3a5f;color:#c8d8ec;border-radius:6px;padding:3px 10px;
@@ -1715,7 +1715,7 @@ function render(){{
       if(endMin>=0&&startMin>12*60&&endMin<startMin)endMin+=24*60;
       if(endMin>0&&endMin<nowMin)d.classList.add("departed");
       d.style.cssText=`left:${{bx.toFixed(1)}}px;width:${{bw.toFixed(1)}}px;background:${{t.color}}`;
-      d.textContent=(end>0&&end<nowMin?"✈ ":"")+t.flight+(t.flight?" · ":"")+t.abbr;
+      d.textContent=(endMin>0&&endMin<nowMin?"✈ ":"")+t.flight+(t.flight?" · ":"")+t.abbr;
       d.title=`${{w.name}} | ${{t.role}} | ${{t.start}}–${{t.end}}`;
       d.setAttribute("draggable","true");
       // short click/tap → task info popup
@@ -1871,8 +1871,8 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
         str(w).strip() for w in _sched["עובד"].dropna().unique()
         if "❌" not in str(w) and str(w).strip() not in ("","nan")
     ))
-    _h = max(700, _n_workers * 48 + 200)
-    _components.html(_html, height=_h, scrolling=True)
+    _h = max(700, _n_workers * 22 + 120)
+    _components.html(_html, height=_h, scrolling=False)
     st.stop()
 
 
