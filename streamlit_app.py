@@ -1532,16 +1532,17 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 html,body{{height:100%;background:#04080f;color:#c8d8ec;
-  font-family:"Segoe UI",Arial,sans-serif;overflow:hidden;display:flex;flex-direction:column}}
+  font-family:"Segoe UI",Arial,sans-serif;overflow:hidden;}}
 /* ── top bar ── */
-#bar{{flex-shrink:0;display:flex;align-items:center;gap:8px;padding:5px 10px;
-  background:#060e1c;border-bottom:1px solid #0d3050;direction:ltr}}
+#bar{{position:fixed;top:0;left:0;right:0;height:36px;
+  display:flex;align-items:center;gap:8px;padding:0 10px;
+  background:#060e1c;border-bottom:1px solid #0d3050;direction:ltr;z-index:10;}}
 .nav-btn{{background:#0d1f30;color:#00c9be;border:1px solid rgba(0,201,190,.35);
   border-radius:8px;padding:4px 14px;font-size:13px;font-weight:800;cursor:pointer}}
 .nav-btn:active{{opacity:.7}}
 #time-lbl{{font-size:12px;color:#64748b;min-width:110px;text-align:center}}
 /* ── scroll container ── */
-#outer{{flex:1;overflow:auto;min-height:0}}
+#outer{{position:fixed;top:36px;left:0;right:0;bottom:0;overflow:auto;}}
 /* ── sticky header row ── */
 .hdr{{display:flex;position:sticky;top:0;z-index:20;
   background:#060e1c;border-bottom:2px solid #0d3050}}
@@ -1572,8 +1573,8 @@ html,body{{height:100%;background:#04080f;color:#c8d8ec;
 .task.departed{{opacity:.45;filter:saturate(.3)}}
 .task.overlap{{border-color:#ef4444!important}}
 /* ── tray ── */
-#tray{{flex-shrink:0;background:#060e1c;border-top:2px solid #0d3050;
-  padding:6px 10px;max-height:60px;overflow-x:auto;display:none;direction:ltr}}
+#tray{{position:fixed;bottom:0;left:0;right:0;background:#060e1c;border-top:2px solid #0d3050;
+  padding:6px 10px;max-height:60px;overflow-x:auto;display:none;direction:ltr;z-index:9;}}
 #tray-inner{{display:flex;gap:6px;align-items:center}}
 .tc{{background:#1e3a5f;color:#c8d8ec;border-radius:6px;padding:3px 10px;
   font-size:9px;font-weight:800;cursor:grab;white-space:nowrap;border:1px solid #334}}
@@ -1869,7 +1870,7 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
         if "❌" not in str(w) and str(w).strip() not in ("","nan")
     ))
     _h = max(700, _n_workers * 22 + 120)
-    _components.html(_html, height=_h, scrolling=True)
+    _components.html(_html, height=_h, scrolling=False)
     st.stop()
 
 
@@ -2050,22 +2051,25 @@ if "schedule_df" in st.session_state:
         with tab_gantt:
             _sched = st.session_state["schedule_df"]
             _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
-            col_g1, col_g2 = st.columns(2)
-            with col_g1:
-                if st.button("📅 פתח גאנט", use_container_width=True, key="open_gantt_tab_btn"):
-                    st.session_state["show_gantt_page"] = True
-                    st.rerun()
-            with col_g2:
-                import base64 as _b64
-                _g_html = _render_interactive_gantt(_sched, _sched, missing_df=_miss)
-                _g_b64  = _b64.b64encode(_g_html.encode("utf-8")).decode()
-                st.markdown(
-                    f'<a href="data:text/html;base64,{_g_b64}" target="_blank" '
-                    f'style="display:block;text-align:center;background:#071b3a;color:#00c9be;'
-                    f'border:1.5px solid #00c9be;border-radius:8px;padding:8px 0;font-weight:700;'
-                    f'font-size:14px;text-decoration:none;line-height:2.2;">🔗 פתח בחלון חדש</a>',
-                    unsafe_allow_html=True,
-                )
+            _g_html      = _render_interactive_gantt(_sched, _sched, missing_df=_miss)
+            _g_html_json = _json.dumps(_g_html, ensure_ascii=False)
+            _open_btn = f"""<style>
+body{{margin:0;padding:6px;background:transparent;}}
+.obtn{{width:100%;padding:11px;background:#071b3a;color:#00c9be;
+  border:1.5px solid #00c9be;border-radius:8px;font-size:15px;
+  font-weight:800;cursor:pointer;font-family:Arial,sans-serif;}}
+.obtn:active{{opacity:.7;}}
+</style>
+<button class="obtn" id="go">📅 פתח גאנט בחלון חדש</button>
+<script>
+var _ganttHtml = {_g_html_json};
+document.getElementById('go').onclick = function() {{
+  var blob = new Blob([_ganttHtml], {{type:'text/html;charset=utf-8'}});
+  var url  = URL.createObjectURL(blob);
+  window.open(url, '_blank');
+}};
+</script>"""
+            _components.html(_open_btn, height=60)
 
         # ── Tab: פנויים באולם ─────────────────────────────────────────────────
         with tab_available:
