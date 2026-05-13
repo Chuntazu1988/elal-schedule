@@ -1393,148 +1393,222 @@ if "_fids_combined_raw" in st.session_state:
 
 
 def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
-    """גאנט פשוט ואמין — טבלת HTML ללא flex/fixed."""
-    import json as _j
+    """גאנט LTR — שמאל=התחלה, ימין=סוף, טווח 26 שעות."""
+    import json as _j, datetime
 
     ROLE_COLORS = {
-        "ראש צוות": "#8e24aa", "דיילת": "#1d6fa8", "דייל": "#1d6fa8",
-        "מתאם תורים": "#d97706", "מפקח TSA": "#dc2626",
-        "שומר TSA": "#16a34a", 'טרייני ר"צ': "#b45309", "טרייני רצ": "#b45309",
+        "ראש צוות":   "#8e24aa",
+        "דיילת":      "#1d6fa8",
+        "דייל":       "#1d6fa8",
+        "מתאם תורים": "#d97706",
+        "מפקח TSA":   "#dc2626",
+        "שומר TSA":   "#16a34a",
+        'טרייני ר"צ': "#b45309",
+        "טרייני רצ":  "#b45309",
     }
 
-    timed = live_schedule[live_schedule["התחלה"].astype(str).str.strip() != ""].copy()
+    timed = live_schedule[
+        live_schedule["התחלה"].astype(str).str.strip() != ""
+    ].copy()
 
     if timed.empty:
         return """<!DOCTYPE html><html><body style="background:#04080f;color:#ef4444;
-            font-family:monospace;padding:20px;">אין נתוני זמן</body></html>"""
+            font-family:monospace;padding:20px;direction:rtl;">
+            <h2>אין נתוני זמן בגאנט</h2></body></html>"""
 
-    # ── time range ──
+    # ── helpers ────────────────────────────────────────────────────────────
     def hm(s):
         try:
             p = str(s).strip().split(":")
-            h, m = int(p[0]), int(p[1])
-            return h + m / 60.0
+            return int(p[0]) + int(p[1]) / 60.0
         except Exception:
-            return -1
+            return -1.0
 
-    starts, ends = [], []
+    # ── find actual first start and last end ───────────────────────────────
+    all_starts, all_ends = [], []
     for _, r in timed.iterrows():
         s = hm(str(r.get("התחלה", "")))
-        e = hm(str(r.get("סיום", "")))
+        e = hm(str(r.get("סיום",   "")))
         if s < 0 or e < 0:
             continue
-        if e < s and s > 12:
-            e += 24
-        starts.append(s)
-        ends.append(e)
+        if e < s and s > 12:   # overnight
+            e += 24.0
+        all_starts.append(s)
+        all_ends.append(e)
 
-    if not starts:
-        t_min, t_max = 0, 24
+    if not all_starts:
+        t_min_f, t_max_f = 0.0, 26.0
     else:
-        t_min = max(0, min(starts) - 0.5)
-        t_max = max(ends) + 0.5
-    t_span = t_max - t_min if t_max > t_min else 24
+        t_min_f = min(all_starts)          # first flight start — no padding
+        t_max_f = max(all_ends)            # last flight end   — no padding
 
-    # ── workers ──
+    # enforce exactly 26-hour window
+    t_span = max(t_max_f - t_min_f, 26.0)
+    t_max_f = t_min_f + t_span
+
+    # ── workers ────────────────────────────────────────────────────────────
     workers = sorted(set(
         str(w).strip() for w in timed["עובד"].dropna()
         if "❌" not in str(w) and str(w).strip() not in ("", "nan")
     ))
 
-    # ── build rows HTML ──
-    TICK_HOURS = list(range(int(t_min), int(t_max) + 2))
-    ROW_H = 36  # px per worker row
-    HDR_H = 28
-    total_h = HDR_H + len(workers) * ROW_H + 20
-
-    # header ticks
-    ticks_html = ""
-    for h in TICK_HOURS:
-        if h < t_min or h > t_max:
-            continue
-        pct = (h - t_min) / t_span * 100
-        lbl = f"{h % 24:02d}:00"
-        ticks_html += (
-            f'<div style="position:absolute;left:{pct:.2f}%;top:0;bottom:0;'
-            f'border-left:1px solid #1e3a5f;white-space:nowrap;">'
-            f'<span style="font-size:10px;color:#00c9be;padding-left:2px;">{lbl}</span></div>'
-        )
-
-    rows_html = ""
-    for i, worker in enumerate(workers):
-        bg = "rgba(0,20,50,.3)" if i % 2 == 0 else "rgba(0,10,30,.15)"
-        wtasks = timed[timed["עובד"] == worker]
-        bars_html = ""
-        for _, t in wtasks.iterrows():
+    # ── build bar data ─────────────────────────────────────────────────────
+    bars = []
+    bid  = 0
+    for worker in workers:
+        for _, t in timed[timed["עובד"] == worker].iterrows():
             s = hm(str(t.get("התחלה", "")))
-            e = hm(str(t.get("סיום", "")))
+            e = hm(str(t.get("סיום",   "")))
             if s < 0 or e < 0:
                 continue
             if e < s and s > 12:
-                e += 24
-            role = normalize_role_label(str(t.get("תפקיד בסיס", "")))
-            color = ROLE_COLORS.get(role, "#334155")
+                e += 24.0
+            role   = normalize_role_label(str(t.get("תפקיד בסיס", "")))
+            color  = ROLE_COLORS.get(role, "#334155")
             flight = str(t.get("טיסה", "")).replace("LY", "").strip()
-            x = (s - t_min) / t_span * 100
-            w = (e - s) / t_span * 100
-            w = max(w, 0.5)
-            bars_html += (
-                f'<div title="{worker} | {role} | {t.get("התחלה","")}–{t.get("סיום","")}" '
-                f'style="position:absolute;left:{x:.2f}%;width:{w:.2f}%;top:4px;bottom:4px;'
-                f'background:{color};border-radius:4px;display:flex;align-items:center;'
-                f'justify-content:center;overflow:hidden;cursor:pointer;">'
-                f'<span style="font-size:9px;font-weight:800;color:white;white-space:nowrap;'
-                f'padding:0 3px;overflow:hidden;">{flight}</span></div>'
-            )
-        # tick lines behind bars
-        for h in TICK_HOURS:
-            if h < t_min or h > t_max:
-                continue
-            pct = (h - t_min) / t_span * 100
-            bars_html += (
-                f'<div style="position:absolute;left:{pct:.2f}%;top:0;bottom:0;'
-                f'border-left:1px solid #1e3a5f;pointer-events:none;"></div>'
+            left_pct  = (s - t_min_f) / t_span * 100
+            width_pct = max((e - s) / t_span * 100, 0.6)
+            bars.append({
+                "id": bid, "w": worker, "fl": flight,
+                "role": role,
+                "s": str(t.get("התחלה", "")),
+                "e": str(t.get("סיום",   "")),
+                "color": color,
+                "l": round(left_pct,  3),
+                "wp": round(width_pct, 3),
+            })
+            bid += 1
+
+    # ── tick hours (whole hours in range) ──────────────────────────────────
+    tick_hours = [h for h in range(int(t_min_f), int(t_max_f) + 2)
+                  if t_min_f <= h <= t_max_f]
+
+    try:
+        base_date = datetime.date.today()
+    except Exception:
+        base_date = None
+
+    # ── tick element builder ───────────────────────────────────────────────
+    def make_tick(h, with_label=False):
+        l_pct  = (h - t_min_f) / t_span * 100
+        is_mid = (h % 24 == 0) and (h > t_min_f + 0.1)
+        if is_mid:
+            day_offset = int(h // 24)
+            day_lbl    = ""
+            if base_date:
+                new_d   = base_date + datetime.timedelta(days=day_offset)
+                day_lbl = new_d.strftime("%d/%m")
+            border = "border-left:2px dashed #f59e0b;"
+            label  = (f'<span style="position:absolute;top:2px;left:3px;'
+                      f'font-size:9px;color:#f59e0b;font-weight:900;'
+                      f'white-space:nowrap;">00:00 | {day_lbl}</span>'
+                      if with_label else "")
+        else:
+            lbl    = f"{int(h) % 24:02d}:00"
+            border = "border-left:1px solid #1e3a5f;"
+            label  = (f'<span style="position:absolute;top:2px;left:3px;'
+                      f'font-size:9px;color:#00c9be;white-space:nowrap;">{lbl}</span>'
+                      if with_label else "")
+        return (f'<div style="position:absolute;left:{l_pct:.3f}%;top:0;bottom:0;'
+                f'{border}pointer-events:none;">{label}</div>')
+
+    ticks_hdr = "".join(make_tick(h, with_label=True) for h in tick_hours)
+
+    # ── rows ───────────────────────────────────────────────────────────────
+    ROW_H = 38
+    HDR_H = 26
+    LBL_W = 130
+
+    rows_html = ""
+    for i, worker in enumerate(workers):
+        bg          = "#0a1628" if i % 2 == 0 else "#060e1c"
+        worker_bars = [b for b in bars if b["w"] == worker]
+
+        # grid lines
+        inner = "".join(make_tick(h) for h in tick_hours)
+
+        # task bars
+        for b in worker_bars:
+            inner += (
+                f'<div id="b{b["id"]}" onclick="showPop({b["id"]})" '
+                f'style="position:absolute;left:{b["l"]}%;width:{b["wp"]}%;'
+                f'top:4px;bottom:4px;background:{b["color"]};border-radius:5px;'
+                f'display:flex;align-items:center;justify-content:center;'
+                f'overflow:hidden;cursor:pointer;border:1px solid transparent;" '
+                f'onmouseenter="this.style.borderColor=\'#fff\'" '
+                f'onmouseleave="this.style.borderColor=\'transparent\'">'
+                f'<span style="font-size:10px;font-weight:800;color:white;'
+                f'white-space:nowrap;padding:0 4px;">{b["fl"]}</span></div>'
             )
 
         rows_html += (
-            f'<div style="display:flex;align-items:stretch;height:{ROW_H}px;'
-            f'background:{bg};border-bottom:1px solid #0a1628;">'
-            f'<div style="width:120px;min-width:120px;flex-shrink:0;font-size:11px;'
-            f'font-weight:800;color:#c8d8ec;display:flex;align-items:center;'
-            f'padding:0 6px;border-right:1px solid #1e3a5f;direction:rtl;">{worker}</div>'
-            f'<div style="position:relative;flex:1;">{bars_html}</div></div>'
+            f'<div style="display:flex;height:{ROW_H}px;background:{bg};'
+            f'border-bottom:1px solid #0d1f30;">'
+            f'<div style="width:{LBL_W}px;min-width:{LBL_W}px;flex-shrink:0;'
+            f'font-size:11px;font-weight:800;color:#c8d8ec;display:flex;'
+            f'align-items:center;padding:0 8px;border-right:1px solid #1e3a5f;'
+            f'background:{bg};direction:rtl;">{worker}</div>'
+            f'<div style="position:relative;flex:1;overflow:hidden;">{inner}</div>'
+            f'</div>'
         )
 
-    legend_html = ""
-    for role, color in ROLE_COLORS.items():
-        legend_html += (
-            f'<span style="display:inline-flex;align-items:center;gap:4px;'
-            f'margin-left:12px;font-size:10px;color:#c8d8ec;">'
-            f'<span style="width:10px;height:10px;border-radius:2px;'
-            f'background:{color};display:inline-block;"></span>{role}</span>'
-        )
+    # ── legend ─────────────────────────────────────────────────────────────
+    legend_html = "".join(
+        f'<span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px;'
+        f'font-size:10px;color:#c8d8ec;">'
+        f'<span style="width:10px;height:10px;border-radius:2px;background:{c};'
+        f'display:inline-block;"></span>{r}</span>'
+        for r, c in ROLE_COLORS.items()
+    )
+
+    bars_json = _j.dumps(bars, ensure_ascii=False)
 
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-* {{ box-sizing:border-box; margin:0; padding:0; }}
-body {{ background:#04080f; font-family:"Segoe UI",Arial,sans-serif; }}
+*{{box-sizing:border-box;margin:0;padding:0;}}
+body{{background:#04080f;font-family:"Segoe UI",Arial,sans-serif;}}
+#pop{{display:none;position:fixed;z-index:999;background:#0d1f30;color:#c8d8ec;
+  border:1px solid #00c9be;border-radius:8px;padding:10px 14px;font-size:12px;
+  min-width:160px;box-shadow:0 4px 20px rgba(0,0,0,.6);direction:rtl;line-height:1.8;}}
 </style></head>
 <body>
-<div style="height:{total_h}px;display:flex;flex-direction:column;">
-  <!-- header -->
-  <div style="display:flex;height:{HDR_H}px;background:#060e1c;
-       border-bottom:2px solid #0d3050;flex-shrink:0;">
-    <div style="width:120px;min-width:120px;flex-shrink:0;border-right:1px solid #1e3a5f;"></div>
-    <div style="position:relative;flex:1;">{ticks_html}</div>
-  </div>
-  <!-- rows -->
-  <div style="overflow-x:auto;flex:1;">{rows_html}</div>
+<div id="pop"></div>
+<!-- header -->
+<div style="display:flex;height:{HDR_H}px;background:#060e1c;
+     border-bottom:2px solid #0d3050;position:sticky;top:0;z-index:10;">
+  <div style="width:{LBL_W}px;min-width:{LBL_W}px;flex-shrink:0;
+       border-right:1px solid #1e3a5f;"></div>
+  <div style="position:relative;flex:1;overflow:hidden;">{ticks_hdr}</div>
 </div>
+<!-- rows -->
+<div style="overflow-x:auto;">{rows_html}</div>
 <!-- legend -->
-<div style="padding:8px 6px;background:#060e1c;border-top:1px solid #0d3050;
-     display:flex;flex-wrap:wrap;gap:4px;">{legend_html}</div>
+<div style="padding:8px 10px;background:#060e1c;border-top:1px solid #0d3050;
+     display:flex;flex-wrap:wrap;gap:4px;direction:rtl;">{legend_html}</div>
+<script>
+const BARS={bars_json};
+function showPop(id){{
+  const b=BARS.find(x=>x.id===id);if(!b)return;
+  const el=document.getElementById("b"+id);
+  const pop=document.getElementById("pop");
+  pop.innerHTML='<strong style="color:#00c9be;font-size:13px;">טיסה '+b.fl+'</strong><br>'
+    +'<span style="color:#94a3b8">עובד: </span>'+b.w+'<br>'
+    +'<span style="color:#94a3b8">תפקיד: </span>'+b.role+'<br>'
+    +'<span style="color:#94a3b8">שעות: </span><strong>'+b.s+' – '+b.e+'</strong>';
+  pop.style.display="block";
+  const rect=el.getBoundingClientRect();
+  const pw=pop.offsetWidth||170;
+  pop.style.top=(rect.bottom+6)+"px";
+  pop.style.left=Math.max(4,Math.min(rect.left,window.innerWidth-pw-8))+"px";
+  clearTimeout(pop._t);
+  pop._t=setTimeout(()=>pop.style.display="none",6000);
+}}
+document.addEventListener("click",e=>{{
+  if(!e.target.closest("[id^='b']"))document.getElementById("pop").style.display="none";
+}});
+</script>
 </body></html>"""
 
     return html
@@ -1565,7 +1639,7 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
         str(w).strip() for w in _sched["עובד"].dropna().unique()
         if "❌" not in str(w) and str(w).strip() not in ("","nan")
     ))
-    _h = max(500, _n_workers * 38 + 120)
+    _h = max(600, _n_workers * 38 + 120)
     _components.html(_html, height=_h, scrolling=True)
     st.stop()
 
