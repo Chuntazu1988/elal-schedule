@@ -1531,20 +1531,19 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
 <title>גאנט עובדים</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-html,body{{height:100%;background:#04080f;color:#c8d8ec;
-  font-family:"Segoe UI",Arial,sans-serif;overflow:hidden;}}
+html,body{{background:#04080f;color:#c8d8ec;font-family:"Segoe UI",Arial,sans-serif;}}
 /* ── top bar ── */
-#bar{{position:fixed;top:0;left:0;right:0;height:36px;
-  display:flex;align-items:center;gap:8px;padding:0 10px;
-  background:#060e1c;border-bottom:1px solid #0d3050;direction:ltr;z-index:10;}}
+#bar{{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:8px;
+  padding:0 10px;height:36px;background:#060e1c;
+  border-bottom:1px solid #0d3050;direction:ltr;}}
 .nav-btn{{background:#0d1f30;color:#00c9be;border:1px solid rgba(0,201,190,.35);
   border-radius:8px;padding:4px 14px;font-size:13px;font-weight:800;cursor:pointer}}
 .nav-btn:active{{opacity:.7}}
 #time-lbl{{font-size:12px;color:#64748b;min-width:110px;text-align:center}}
 /* ── scroll container ── */
-#outer{{position:fixed;top:36px;left:0;right:0;bottom:0;overflow:auto;}}
+#outer{{overflow-x:auto;}}
 /* ── sticky header row ── */
-.hdr{{display:flex;position:sticky;top:0;z-index:20;
+.hdr{{display:flex;position:sticky;top:36px;z-index:20;
   background:#060e1c;border-bottom:2px solid #0d3050}}
 .hdr-lbl{{width:110px;min-width:110px;flex-shrink:0;
   position:sticky;left:0;background:#060e1c;z-index:21;
@@ -1573,8 +1572,8 @@ html,body{{height:100%;background:#04080f;color:#c8d8ec;
 .task.departed{{opacity:.45;filter:saturate(.3)}}
 .task.overlap{{border-color:#ef4444!important}}
 /* ── tray ── */
-#tray{{position:fixed;bottom:0;left:0;right:0;background:#060e1c;border-top:2px solid #0d3050;
-  padding:6px 10px;max-height:60px;overflow-x:auto;display:none;direction:ltr;z-index:9;}}
+#tray{{background:#060e1c;border-top:2px solid #0d3050;
+  padding:6px 10px;max-height:60px;overflow-x:auto;display:none;direction:ltr}}
 #tray-inner{{display:flex;gap:6px;align-items:center}}
 .tc{{background:#1e3a5f;color:#c8d8ec;border-radius:6px;padding:3px 10px;
   font-size:9px;font-weight:800;cursor:grab;white-space:nowrap;border:1px solid #334}}
@@ -1865,7 +1864,12 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
     _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
 
     _html  = _render_interactive_gantt(_sched, _sched, missing_df=_miss)
-    _components.html(_html, height=2000, scrolling=False)
+    _n_workers = len(set(
+        str(w).strip() for w in _sched["עובד"].dropna().unique()
+        if "❌" not in str(w) and str(w).strip() not in ("","nan")
+    ))
+    _h = 36 + 22 + _n_workers * 22 + 80
+    _components.html(_html, height=max(600, _h), scrolling=True)
     st.stop()
 
 
@@ -2044,11 +2048,15 @@ if "schedule_df" in st.session_state:
 
         # ── Tab: גאנט ────────────────────────────────────────────────────────
         with tab_gantt:
-            _sched = st.session_state["schedule_df"]
-            _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
-            if st.button("📅 פתח גאנט", use_container_width=True, key="open_gantt_tab_btn"):
-                st.session_state["show_gantt_page"] = True
-                st.rerun()
+            _sched  = st.session_state["schedule_df"]
+            _miss   = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
+            _g_html = _render_interactive_gantt(_sched, _sched, missing_df=_miss)
+            _n_w    = len(set(
+                str(w).strip() for w in _sched["עובד"].dropna().unique()
+                if "❌" not in str(w) and str(w).strip() not in ("", "nan")
+            ))
+            _g_height = 36 + 22 + _n_w * 22 + 80   # bar + hdr + rows + padding
+            _components.html(_g_html, height=max(500, _g_height), scrolling=True)
 
         # ── Tab: פנויים באולם ─────────────────────────────────────────────────
         with tab_available:
