@@ -1532,7 +1532,6 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 html,body{{background:#04080f;color:#c8d8ec;font-family:"Segoe UI",Arial,sans-serif;}}
-/* ── top bar ── */
 #bar{{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:8px;
   padding:0 10px;height:36px;background:#060e1c;
   border-bottom:1px solid #0d3050;direction:ltr;}}
@@ -1540,10 +1539,9 @@ html,body{{background:#04080f;color:#c8d8ec;font-family:"Segoe UI",Arial,sans-se
   border-radius:8px;padding:4px 14px;font-size:13px;font-weight:800;cursor:pointer}}
 .nav-btn:active{{opacity:.7}}
 #time-lbl{{font-size:12px;color:#64748b;min-width:110px;text-align:center}}
-/* ── scroll container ── */
 #outer{{overflow-x:auto;}}
 /* ── sticky header row ── */
-.hdr{{display:flex;position:sticky;top:36px;z-index:20;
+.hdr{{display:flex;position:sticky;top:0;z-index:20;
   background:#060e1c;border-bottom:2px solid #0d3050}}
 .hdr-lbl{{width:110px;min-width:110px;flex-shrink:0;
   position:sticky;left:0;background:#060e1c;z-index:21;
@@ -1572,7 +1570,7 @@ html,body{{background:#04080f;color:#c8d8ec;font-family:"Segoe UI",Arial,sans-se
 .task.departed{{opacity:.45;filter:saturate(.3)}}
 .task.overlap{{border-color:#ef4444!important}}
 /* ── tray ── */
-#tray{{background:#060e1c;border-top:2px solid #0d3050;
+#tray{{flex-shrink:0;background:#060e1c;border-top:2px solid #0d3050;
   padding:6px 10px;max-height:60px;overflow-x:auto;display:none;direction:ltr}}
 #tray-inner{{display:flex;gap:6px;align-items:center}}
 .tc{{background:#1e3a5f;color:#c8d8ec;border-radius:6px;padding:3px 10px;
@@ -1712,7 +1710,7 @@ function render(){{
       if(endMin>=0&&startMin>12*60&&endMin<startMin)endMin+=24*60;
       if(endMin>0&&endMin<nowMin)d.classList.add("departed");
       d.style.cssText=`left:${{bx.toFixed(1)}}px;width:${{bw.toFixed(1)}}px;background:${{t.color}}`;
-      d.textContent=(endMin>0&&endMin<nowMin?"✈ ":"")+t.flight+(t.flight?" · ":"")+t.abbr;
+      d.textContent=(end>0&&end<nowMin?"✈ ":"")+t.flight+(t.flight?" · ":"")+t.abbr;
       d.title=`${{w.name}} | ${{t.role}} | ${{t.start}}–${{t.end}}`;
       d.setAttribute("draggable","true");
       // short click/tap → task info popup
@@ -1830,11 +1828,23 @@ if(MISS.length){{
   }});
 }}
 document.addEventListener("click",()=>document.getElementById("pop").style.display="none");
+
+// ── DIAGNOSTIC ──────────────────────────────────────────────────────
+var diagDiv = document.createElement("div");
+diagDiv.style.cssText = "background:#1a3a00;color:#00ff88;font-size:13px;padding:8px 12px;"
+  + "font-family:monospace;direction:ltr;border-bottom:1px solid #00ff88;";
+diagDiv.textContent = "Workers: " + W.length
+  + " | G_MIN:" + G_MIN + " G_MAX:" + G_MAX
+  + " | first: " + (W[0] ? W[0].name + " tasks:" + W[0].tasks.length : "NONE");
+document.body.insertBefore(diagDiv, document.getElementById("bar").nextSibling);
+// ────────────────────────────────────────────────────────────────────
+
 try{{
   render();
 }}catch(err){{
   const e=document.createElement("div");
-  e.style.cssText="position:fixed;top:50px;left:10px;right:10px;background:#1a0000;color:#ff6b6b;border:2px solid #ff6b6b;border-radius:8px;padding:12px;font-size:11px;z-index:9999;direction:ltr;white-space:pre-wrap;font-family:monospace;";
+  e.style.cssText="background:#1a0000;color:#ff6b6b;border:2px solid #ff6b6b;"
+    + "padding:12px;font-size:11px;direction:ltr;white-space:pre-wrap;font-family:monospace;margin:10px;";
   e.textContent="JS ERROR: "+err.message+"\n"+(err.stack||"");
   document.body.appendChild(e);
 }}
@@ -1868,8 +1878,8 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
         str(w).strip() for w in _sched["עובד"].dropna().unique()
         if "❌" not in str(w) and str(w).strip() not in ("","nan")
     ))
-    _h = 36 + 22 + _n_workers * 22 + 80
-    _components.html(_html, height=max(600, _h), scrolling=True)
+    _h = max(700, _n_workers * 22 + 120)
+    _components.html(_html, height=_h, scrolling=False)
     st.stop()
 
 
@@ -2055,8 +2065,7 @@ if "schedule_df" in st.session_state:
                 str(w).strip() for w in _sched["עובד"].dropna().unique()
                 if "❌" not in str(w) and str(w).strip() not in ("", "nan")
             ))
-            _g_height = 36 + 22 + _n_w * 22 + 80   # bar + hdr + rows + padding
-            _components.html(_g_html, height=max(500, _g_height), scrolling=True)
+            _components.html(_g_html, height=max(600, _n_w * 22 + 150), scrolling=True)
 
         # ── Tab: פנויים באולם ─────────────────────────────────────────────────
         with tab_available:
