@@ -1531,15 +1531,17 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
 <title>גאנט עובדים</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-html,body{{background:#04080f;color:#c8d8ec;font-family:"Segoe UI",Arial,sans-serif;}}
-#bar{{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:8px;
-  padding:0 10px;height:36px;background:#060e1c;
-  border-bottom:1px solid #0d3050;direction:ltr;}}
+html,body{{height:100%;background:#04080f;color:#c8d8ec;
+  font-family:"Segoe UI",Arial,sans-serif;overflow:hidden;display:flex;flex-direction:column}}
+/* ── top bar ── */
+#bar{{flex-shrink:0;display:flex;align-items:center;gap:8px;padding:5px 10px;
+  background:#060e1c;border-bottom:1px solid #0d3050;direction:ltr}}
 .nav-btn{{background:#0d1f30;color:#00c9be;border:1px solid rgba(0,201,190,.35);
   border-radius:8px;padding:4px 14px;font-size:13px;font-weight:800;cursor:pointer}}
 .nav-btn:active{{opacity:.7}}
 #time-lbl{{font-size:12px;color:#64748b;min-width:110px;text-align:center}}
-#outer{{overflow-x:auto;}}
+/* ── scroll container ── */
+#outer{{flex:1;overflow:auto;min-height:0}}
 /* ── sticky header row ── */
 .hdr{{display:flex;position:sticky;top:0;z-index:20;
   background:#060e1c;border-bottom:2px solid #0d3050}}
@@ -1828,23 +1830,11 @@ if(MISS.length){{
   }});
 }}
 document.addEventListener("click",()=>document.getElementById("pop").style.display="none");
-
-// ── DIAGNOSTIC ──────────────────────────────────────────────────────
-var diagDiv = document.createElement("div");
-diagDiv.style.cssText = "background:#1a3a00;color:#00ff88;font-size:13px;padding:8px 12px;"
-  + "font-family:monospace;direction:ltr;border-bottom:1px solid #00ff88;";
-diagDiv.textContent = "Workers: " + W.length
-  + " | G_MIN:" + G_MIN + " G_MAX:" + G_MAX
-  + " | first: " + (W[0] ? W[0].name + " tasks:" + W[0].tasks.length : "NONE");
-document.body.insertBefore(diagDiv, document.getElementById("bar").nextSibling);
-// ────────────────────────────────────────────────────────────────────
-
 try{{
   render();
 }}catch(err){{
   const e=document.createElement("div");
-  e.style.cssText="background:#1a0000;color:#ff6b6b;border:2px solid #ff6b6b;"
-    + "padding:12px;font-size:11px;direction:ltr;white-space:pre-wrap;font-family:monospace;margin:10px;";
+  e.style.cssText="position:fixed;top:50px;left:10px;right:10px;background:#1a0000;color:#ff6b6b;border:2px solid #ff6b6b;border-radius:8px;padding:12px;font-size:11px;z-index:9999;direction:ltr;white-space:pre-wrap;font-family:monospace;";
   e.textContent="JS ERROR: "+err.message+"\n"+(err.stack||"");
   document.body.appendChild(e);
 }}
@@ -1862,7 +1852,6 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
         if st.button("← חזרה", key="gantt_back_late"):
             st.rerun()
     with _tc:
-        # הצג הודעת swap אם יש
         _smsg = st.session_state.pop("_gantt_swap_msg", "")
         if _smsg:
             _color = "#00c9be" if "✅" in _smsg else "#ef4444"
@@ -1870,16 +1859,66 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
         else:
             st.markdown('<div style="direction:rtl;font-size:18px;font-weight:900;color:#00c9be;padding:6px 0;">📅 גאנט עובדים</div>', unsafe_allow_html=True)
 
-    _sched = st.session_state["schedule_df"]
-    _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
+    _sched  = st.session_state["schedule_df"]
+    _timed2 = _sched[_sched["התחלה"].astype(str).str.strip() != ""].copy()
 
-    _html  = _render_interactive_gantt(_sched, _sched, missing_df=_miss)
-    _n_workers = len(set(
-        str(w).strip() for w in _sched["עובד"].dropna().unique()
-        if "❌" not in str(w) and str(w).strip() not in ("","nan")
-    ))
-    _h = max(700, _n_workers * 22 + 120)
-    _components.html(_html, height=_h, scrolling=False)
+    if _timed2.empty:
+        st.info("אין נתוני שיבוץ להצגה")
+    else:
+        _RCOL = {
+            "ראש צוות": "#8e24aa", "דיילת": "#1d6fa8", "דייל": "#1d6fa8",
+            "מתאם תורים": "#d97706", "מפקח TSA": "#dc2626",
+            "שומר TSA": "#16a34a", 'טרייני ר"צ': "#b45309", "טרייני רצ": "#b45309",
+        }
+        _base2 = pd.Timestamp("2000-01-01")
+        _rows2 = []
+        for _, _r2 in _timed2.iterrows():
+            _w2 = str(_r2.get("עובד", ""))
+            if "❌" in _w2 or not _w2.strip() or _w2 == "nan":
+                continue
+            try:
+                _sh2, _sm2 = map(int, str(_r2.get("התחלה","")).split(":"))
+                _eh2, _em2 = map(int, str(_r2.get("סיום","")).split(":"))
+                _s2 = _base2 + pd.Timedelta(hours=_sh2, minutes=_sm2)
+                _e2 = _base2 + pd.Timedelta(hours=_eh2, minutes=_em2)
+                if _e2 <= _s2:
+                    _e2 += pd.Timedelta(days=1)
+                _rows2.append({
+                    "עובד": _w2, "Start": _s2, "Finish": _e2,
+                    "תפקיד": normalize_role_label(str(_r2.get("תפקיד בסיס",""))),
+                    "טיסה":  str(_r2.get("טיסה","")).replace("LY","").strip(),
+                })
+            except Exception:
+                pass
+
+        if _rows2:
+            import plotly.express as _px2
+            _df2   = pd.DataFrame(_rows2)
+            _wsort = sorted(_df2["עובד"].unique().tolist())
+            _fig2  = _px2.timeline(
+                _df2,
+                x_start="Start", x_end="Finish",
+                y="עובד", color="תפקיד", text="טיסה",
+                color_discrete_map=_RCOL,
+                category_orders={"עובד": _wsort},
+                hover_data={"Start":"|%H:%M","Finish":"|%H:%M","תפקיד":True,"עובד":False},
+            )
+            _fig2.update_layout(
+                height=max(600, len(_wsort) * 30 + 120),
+                paper_bgcolor="#04080f", plot_bgcolor="#060e1c",
+                font=dict(color="#c8d8ec", size=11),
+                margin=dict(l=5, r=5, t=40, b=10),
+                xaxis=dict(tickformat="%H:%M", gridcolor="#0d3050", title=None),
+                yaxis=dict(title=None, gridcolor="#0d3050", autorange="reversed"),
+                legend=dict(orientation="h", yanchor="bottom", y=1.01, xanchor="right", x=1),
+            )
+            _fig2.update_traces(
+                textposition="inside", insidetextanchor="middle",
+                textfont=dict(size=9, color="white"),
+            )
+            st.plotly_chart(_fig2, use_container_width=True)
+        else:
+            st.info("אין נתונים להצגה")
     st.stop()
 
 
@@ -2058,14 +2097,81 @@ if "schedule_df" in st.session_state:
 
         # ── Tab: גאנט ────────────────────────────────────────────────────────
         with tab_gantt:
-            _sched  = st.session_state["schedule_df"]
-            _miss   = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
-            _g_html = _render_interactive_gantt(_sched, _sched, missing_df=_miss)
-            _n_w    = len(set(
-                str(w).strip() for w in _sched["עובד"].dropna().unique()
-                if "❌" not in str(w) and str(w).strip() not in ("", "nan")
-            ))
-            _components.html(_g_html, height=max(600, _n_w * 22 + 150), scrolling=True)
+            _sched = st.session_state["schedule_df"]
+            _timed = _sched[_sched["התחלה"].astype(str).str.strip() != ""].copy()
+
+            if _timed.empty:
+                st.info("אין נתוני שיבוץ להצגה")
+            else:
+                ROLE_COLORS_G = {
+                    "ראש צוות": "#8e24aa", "דיילת": "#1d6fa8", "דייל": "#1d6fa8",
+                    "מתאם תורים": "#d97706", "מפקח TSA": "#dc2626",
+                    "שומר TSA": "#16a34a", 'טרייני ר"צ': "#b45309", "טרייני רצ": "#b45309",
+                }
+                _base = pd.Timestamp("2000-01-01")
+                _rows = []
+                for _, _r in _timed.iterrows():
+                    _w = str(_r.get("עובד", ""))
+                    if "❌" in _w or not _w.strip() or _w == "nan":
+                        continue
+                    _s = str(_r.get("התחלה", ""))
+                    _e = str(_r.get("סיום",   ""))
+                    _role = normalize_role_label(str(_r.get("תפקיד בסיס", "")))
+                    _fl   = str(_r.get("טיסה", "")).replace("LY", "").strip()
+                    try:
+                        _sh, _sm = map(int, _s.split(":"))
+                        _eh, _em = map(int, _e.split(":"))
+                        _s_dt = _base + pd.Timedelta(hours=_sh, minutes=_sm)
+                        _e_dt = _base + pd.Timedelta(hours=_eh, minutes=_em)
+                        if _e_dt <= _s_dt:          # overnight — crosses midnight
+                            _e_dt += pd.Timedelta(days=1)
+                        _rows.append({
+                            "עובד": _w, "Start": _s_dt, "Finish": _e_dt,
+                            "תפקיד": _role, "טיסה": _fl,
+                        })
+                    except Exception:
+                        pass
+
+                if not _rows:
+                    st.info("אין נתונים להצגה בגאנט")
+                else:
+                    import plotly.express as _px
+                    _df_g = pd.DataFrame(_rows)
+                    _workers_sorted = sorted(_df_g["עובד"].unique().tolist())
+                    _fig = _px.timeline(
+                        _df_g,
+                        x_start="Start", x_end="Finish",
+                        y="עובד", color="תפקיד", text="טיסה",
+                        color_discrete_map=ROLE_COLORS_G,
+                        category_orders={"עובד": _workers_sorted},
+                        hover_data={"Start": "|%H:%M", "Finish": "|%H:%M",
+                                    "תפקיד": True, "עובד": False},
+                    )
+                    _fig.update_layout(
+                        height=max(500, len(_workers_sorted) * 30 + 120),
+                        paper_bgcolor="#04080f",
+                        plot_bgcolor="#060e1c",
+                        font=dict(color="#c8d8ec", size=11),
+                        margin=dict(l=5, r=5, t=40, b=10),
+                        xaxis=dict(
+                            tickformat="%H:%M", gridcolor="#0d3050",
+                            title=None, tickfont=dict(size=10),
+                        ),
+                        yaxis=dict(
+                            title=None, gridcolor="#0d3050",
+                            autorange="reversed", tickfont=dict(size=10),
+                        ),
+                        legend=dict(
+                            orientation="h", yanchor="bottom",
+                            y=1.01, xanchor="right", x=1,
+                            font=dict(size=10),
+                        ),
+                    )
+                    _fig.update_traces(
+                        textposition="inside", insidetextanchor="middle",
+                        textfont=dict(size=9, color="white"),
+                    )
+                    st.plotly_chart(_fig, use_container_width=True)
 
         # ── Tab: פנויים באולם ─────────────────────────────────────────────────
         with tab_available:
