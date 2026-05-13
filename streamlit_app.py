@@ -317,8 +317,6 @@ if _gantt_swap:
                     if _emp_r.empty:
                         _reason = "לא נמצא בקובץ העובדים"
                     else:
-                        from helpers import classify_shift, is_within_shift
-                        from scheduler import to_datetime_time, is_time_text
                         _er = _emp_r.iloc[0]
                         if is_time_text(_t_start) and is_time_text(_t_end):
                             try:
@@ -359,8 +357,6 @@ if _gantt_swap:
     except Exception as _e:
         _swap_msg = f"שגיאה: {_e}"
 
-    _is_ok   = "✅" in _swap_msg
-    _color   = "#00c9be" if _is_ok else "#ef4444"
     if _swap_msg:
         st.session_state["_gantt_swap_msg"] = _swap_msg
     st.session_state["show_gantt_page"] = True
@@ -391,8 +387,6 @@ employees_file = sidebar_emp   or st.session_state.get("employees_file_obj")
 _goto_gantt = st.session_state.get("show_gantt_page", False)
 
 if not daily_file or not employees_file:
-    import re as _re
-
     show_upload   = st.session_state.get("show_upload_form", False)
     _goto_gantt   = st.session_state.get("show_gantt_page",  False)
 
@@ -654,16 +648,11 @@ with st.expander("🕒 מי עובד היום?"):
         if not is_time_text(s): return 9999
         return (time_to_minutes(s) - 2 * 60) % (24 * 60)
 
-    def _end_sort(s):
-        s = str(s).strip()
-        if not is_time_text(s): return 9999
-        return (time_to_minutes(s) - 2 * 60) % (24 * 60)
-
     _preview_cols = [c for c in ["שם", "תחילת משמרת", "סוף משמרת"] if c in _today_employees.columns]
     _display_df   = _today_employees[_preview_cols].copy()
     if "תחילת משמרת" in _display_df.columns:
         _display_df["_ss"] = _display_df["תחילת משמרת"].apply(_start_sort)
-        _display_df["_se"] = _display_df["סוף משמרת"].apply(_end_sort) if "סוף משמרת" in _display_df.columns else 9999
+        _display_df["_se"] = _display_df["סוף משמרת"].apply(_start_sort) if "סוף משמרת" in _display_df.columns else 9999
         _display_df = _display_df.sort_values(["_ss", "_se"]).drop(columns=["_ss", "_se"])
     _display_df = _display_df.reset_index(drop=True)
 
@@ -1393,8 +1382,6 @@ if "_fids_combined_raw" in st.session_state:
 
 def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
     """בונה HTML מלא לגאנט ומחזיר אותו — נפתח ב-blob URL בטאב חדש."""
-    import json as _j
-
     ROLE_COLORS = {
         "ראש צוות": "#8e24aa", "דיילת": "#1d6fa8", "דייל": "#1d6fa8",
         "מתאם תורים": "#d97706", "מפקח TSA": "#dc2626",
@@ -1515,8 +1502,8 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
                 "color": "#374151", "abbr": ROLE_ABBR.get(role, role[:4]),
             })
 
-    gdata = _j.dumps(workers_data, ensure_ascii=False)
-    mdata = _j.dumps(missing_data, ensure_ascii=False)
+    gdata = _json.dumps(workers_data, ensure_ascii=False)
+    mdata = _json.dumps(missing_data, ensure_ascii=False)
 
     # ── Streamlit base URL for swap navigation ──
     try:
@@ -1944,9 +1931,8 @@ if st.session_state.get("show_time_form", False):
     with tf_go:
         if st.button("✅ בנה שיבוץ אוטומטי בטווח זה", use_container_width=True, key="tf_confirm"):
             try:
-                from datetime import datetime as _dt
                 def _hm(s):
-                    return _dt.strptime(s.strip(), "%H:%M")
+                    return datetime.strptime(s.strip(), "%H:%M")
                 t_from = _hm(time_from)
                 t_to   = _hm(time_to)
 
