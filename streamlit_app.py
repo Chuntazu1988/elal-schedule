@@ -1432,8 +1432,7 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
     g_max = 26  # default
 
     if not timed.empty:
-        _max_end   = 0
-        _min_start = 99999
+        _max_end = 0
         for _, _row in timed.iterrows():
             _sm = _hm_to_min(str(_row.get("התחלה", "")))
             _em = _hm_to_min(str(_row.get("סיום", "")))
@@ -1444,15 +1443,11 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
                 _em += 24 * 60
             if _em > _max_end:
                 _max_end = _em
-            if _sm < _min_start:
-                _min_start = _sm
         if _max_end > 0:
             _last_h = _max_end // 60
             _last_m = _max_end % 60
             g_max = _last_h + (1 if _last_m == 0 else 2)
             g_max = min(g_max, 30)
-        if _min_start < 99999:
-            g_min = max(0, _min_start // 60 - 1)
 
     # ── workers: from rows that HAVE time data (timed) ──
     # Also include workers from full schedule (counter workers without flights)
@@ -1536,17 +1531,17 @@ def _render_interactive_gantt(live_schedule, schedule_df, missing_df=None):
 <title>גאנט עובדים</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-html,body{{height:100%;background:#04080f;color:#c8d8ec;
-  font-family:"Segoe UI",Arial,sans-serif;overflow:hidden;display:flex;flex-direction:column}}
+html,body{{background:#04080f;color:#c8d8ec;
+  font-family:"Segoe UI",Arial,sans-serif;}}
 /* ── top bar ── */
-#bar{{flex-shrink:0;display:flex;align-items:center;gap:8px;padding:5px 10px;
+#bar{{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:8px;padding:5px 10px;
   background:#060e1c;border-bottom:1px solid #0d3050;direction:ltr}}
 .nav-btn{{background:#0d1f30;color:#00c9be;border:1px solid rgba(0,201,190,.35);
   border-radius:8px;padding:4px 14px;font-size:13px;font-weight:800;cursor:pointer}}
 .nav-btn:active{{opacity:.7}}
 #time-lbl{{font-size:12px;color:#64748b;min-width:110px;text-align:center}}
 /* ── scroll container ── */
-#outer{{flex:1;overflow:auto;min-height:0}}
+#outer{{overflow-x:auto;overflow-y:visible;}}
 /* ── sticky header row ── */
 .hdr{{display:flex;position:sticky;top:0;z-index:20;
   background:#060e1c;border-bottom:2px solid #0d3050}}
@@ -1577,7 +1572,7 @@ html,body{{height:100%;background:#04080f;color:#c8d8ec;
 .task.departed{{opacity:.45;filter:saturate(.3)}}
 .task.overlap{{border-color:#ef4444!important}}
 /* ── tray ── */
-#tray{{flex-shrink:0;background:#060e1c;border-top:2px solid #0d3050;
+#tray{{background:#060e1c;border-top:2px solid #0d3050;
   padding:6px 10px;max-height:60px;overflow-x:auto;display:none;direction:ltr}}
 #tray-inner{{display:flex;gap:6px;align-items:center}}
 .tc{{background:#1e3a5f;color:#c8d8ec;border-radius:6px;padding:3px 10px;
@@ -1876,8 +1871,8 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
         str(w).strip() for w in _sched["עובד"].dropna().unique()
         if "❌" not in str(w) and str(w).strip() not in ("","nan")
     ))
-    _h = max(700, _n_workers * 22 + 120)
-    _components.html(_html, height=_h, scrolling=False)
+    _h = max(700, _n_workers * 48 + 200)
+    _components.html(_html, height=_h, scrolling=True)
     st.stop()
 
 
