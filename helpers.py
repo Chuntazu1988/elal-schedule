@@ -356,39 +356,16 @@ def return_text_by_shift(emp_row, task_end_dt):
     return "חזרה לדלפקים"
 
 
-def is_0200_shift(emp):
-    """
-    Returns True only for shifts that start at exactly 02:00
-    and end at 08:30 or 09:30.
-    """
-    ss = clean_text(emp.get("תחילת משמרת", ""))
-    se = clean_text(emp.get("סוף משמרת",   ""))
-    if not is_time_text(ss) or not is_time_text(se):
-        return False
-    return time_to_minutes(ss) == 2 * 60 and time_to_minutes(se) in (8 * 60 + 30, 9 * 60 + 30)
-
-
 def break_deadline_before_flight(emp, task_start_minutes):
     """
-    Returns the latest time the employee must START their break, as HH:MM.
-
-    Rules:
-    - For 02:00–08:30 / 02:00–09:30 shifts:
-        * No flight before 05:30 → fixed break at 03:30
-        * Flight before 05:30     → standard rule: task_start - 45 (break) - 15 (walk)
-    - For other early_morning shifts: standard rule: task_start - 45 - 15
-    - All other shifts: None
+    For early morning shifts: latest time employee must START break
+    so they can: break (45 min) + walk to gate (15 min) + arrive on time.
+    Returns HH:MM string, or None if not applicable.
     """
     if classify_shift(emp) != "early_morning":
         return None
 
-    flight_before_0530 = task_start_minutes < 5 * 60 + 30
-
-    if is_0200_shift(emp) and not flight_before_0530:
-        deadline_min = 3 * 60 + 30  # 03:30 קבוע
-    else:
-        deadline_min = task_start_minutes - 45 - 15  # זמן רגיל לפי תפקיד
-
+    deadline_min = task_start_minutes - 15 - 45
     if deadline_min < 0:
         deadline_min += 1440
     h = (deadline_min // 60) % 24
@@ -446,6 +423,3 @@ def continuation_text_for_employee(timed_df, current_idx, emp, employees_df):
     task_end_dt = to_datetime_time(row["סיום"])
     return return_text_by_shift(emp_row.iloc[0], task_end_dt)
 
-
-def next_task_text_for_employee(timed_df, current_idx, emp, employees_df):
-    return continuation_text_for_employee(timed_df, current_idx, emp, employees_df)

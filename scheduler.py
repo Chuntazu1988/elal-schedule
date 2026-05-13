@@ -16,18 +16,6 @@ from helpers import (
 
 
 # =========================
-# NAME LOOKUP HELPER
-# =========================
-
-def find_emp_row(employees_df, worker_name):
-    """חיפוש עובד לפי name_key — עמיד בפני שמות בסדר הפוך (שחר פרגסליך = פרגסליך שחר)."""
-    key = name_key(clean_text(worker_name))
-    mask = employees_df["_name_key"].apply(lambda k: name_key(str(k)) == key)
-    matched = employees_df[mask]
-    return matched
-
-
-# =========================
 # FLIGHT RULES
 # =========================
 
@@ -132,18 +120,6 @@ def role_end_time(flight):
 # SHIFT / AVAILABILITY
 # =========================
 
-def shift_length_local(emp):
-    """Local version to avoid circular import."""
-    shift_start = clean_text(emp.get("תחילת משמרת", ""))
-    shift_end   = clean_text(emp.get("סוף משמרת", ""))
-    if not is_time_text(shift_start) or not is_time_text(shift_end):
-        return 0
-    s = time_to_minutes(shift_start)
-    e = time_to_minutes(shift_end)
-    if e < s:
-        e += 24 * 60
-    return e - s
-
 
 def is_within_shift(emp, task_start, task_end):
     shift_start = clean_text(emp.get("תחילת משמרת", ""))
@@ -202,7 +178,6 @@ def assigned_minutes(assignments, emp_name):
 
 
 def has_room_for_break(assignments, emp, emp_name, start, end):
-    from helpers import shift_length, required_break
     length = shift_length(emp)
     if length == 0:
         return False
@@ -429,37 +404,31 @@ def sort_candidates(candidates, assignments, role, task_start=None, task_end=Non
     candidates["_shift_priority"] = candidates.apply(shift_priority, axis=1)
 
     def dual_qual_score(emp_row):
-        # מיועד למקרה שעובד מוסמך גם כמפקח TSA וגם כראש צוות —
-        # בשיבוץ ל-TSA הוא מועדף (כי ראש צוות יתפוס אותו אחר כך);
-        # לוגיקה זו מוחלפת ע"י _role_fit למטה ונשמרת לתאימות אחורה בלבד.
+        is_tsa = str(emp_row.get("מפקח TSA", emp_row.get("מפקח tsa", ""))).strip() == "כן"
+        is_tl  = str(emp_row.get("ראש צוות", "")).strip() == "כן"
+        if is_tsa and is_tl:
+            if role == "מפקח TSA":  return 0
+            if role == "ראש צוות": return 1
         return 0
 
-    candidates["_dual_qual"] = 0  # לא בשימוש — _role_fit מטפל בכל סדרי העדיפות
+    candidates["_dual_qual"] = candidates.apply(dual_qual_score, axis=1)
 
-    # ── עדיפות לרצים (ראש צוות) לפי היררכיה ──────────────────────────────
-    # ראש צוות → מפקח TSA (אם מוסמך) → מתאם תורים → דייל
-    # עובד שאינו ראש צוות מקבל 0 ותמיד יוקדם על פניהם בתפקידים משניים
-    def tl_opportunity_cost(emp_row):
-        is_tl  = str(emp_row.get("ראש צוות", "")).strip() == "כן"
-        if not is_tl:
-            return 0
-        is_tsa = str(emp_row.get("מפקח TSA", emp_row.get("מפקח tsa", ""))).strip() == "כן"
-        if role == "ראש צוות":                  return 0  # תפקיד ראשי
-        if role == "מפקח TSA" and is_tsa:        return 1  # עדיפות שנייה אם מוסמך
-        if role == "מתאם תורים":                 return 2  # עדיפות שלישית
-        if role == "דייל":                        return 3  # אחרון בתור
-        return 1
-
-    candidates["_role_fit"] = candidates.apply(tl_opportunity_cost, axis=1)
-
-    sort_cols_base = ["_role_fit", "_shift_priority", "_area_penalty", "_nearby_tasks", "_shift_proximity", "_task_count"]
+    sort_cols_base = ["_dual_qual", "_shift_priority", "_area_penalty", "_nearby_tasks", "_shift_proximity", "_task_count"]
 
     if role == "ראש צוות":
         candidates["_role_count"] = candidates["שם"].apply(
             lambda name: count_team_lead_tasks_local(assignments, name)
         )
         return candidates.sort_values(
-            ["_role_fit", "_shift_priority", "_area_penalty", "_nearby_tasks", "_shift_proximity", "_role_count", "_task_count"]
+            ["_dual_qual", "_shift_priority", "_area_penalty", "_nearby_tasks", "_shift_proximity", "_role_count", "_task_count"]
+        )
+
+    if role == "דייל":
+        candidates["_role_fit"] = candidates.apply(
+            lambda row: 0 if str(row.get("ראש צוות", "")).strip() == "כן" else 1, axis=1
+        )
+        return candidates.sort_values(
+            ["_dual_qual", "_shift_priority", "_area_penalty", "_nearby_tasks", "_shift_proximity", "_role_fit", "_task_count"]
         )
 
     return candidates.sort_values(sort_cols_base)
@@ -469,7 +438,7 @@ def has_required_mentor(assignments_for_flight, employees_df, training_type):
     required_col = "מסמיך רצים" if training_type == "הסמכה" else "חונך רצים"
     for task in assignments_for_flight:
         if str(task["תפקיד"]).startswith("ראש צוות") and "❌" not in str(task["עובד"]):
-            emp = find_emp_row(employees_df, task["עובד"])
+            emp = employees_df[employees_df["שם"] == task["עובד"]]
             if not emp.empty and str(emp.iloc[0].get(required_col, "")).strip() == "כן":
                 return True
     return False
@@ -492,7 +461,7 @@ def flight_has_mentor_teamlead(assignments_for_flight, employees_df, training_ty
         worker = str(task.get("עובד", ""))
         if "❌" in worker:
             continue
-        emp = find_emp_row(employees_df, worker)
+        emp = employees_df[employees_df["שם"] == worker]
         if emp.empty:
             continue
         row = emp.iloc[0]
@@ -507,6 +476,30 @@ def trainee_already_used(assignments):
         if str(task.get("תפקיד בסיס", "")) == "טרייני רצ" and "❌" not in str(task.get("עובד", "")):
             return True
     return False
+
+
+def _try_select(candidates, assignments, role, start, end, flight_gate,
+                check_break=True, check_continuous=True):
+    """
+    Scan candidates in order and return the first available name, or None.
+    Relaxes constraints progressively:
+      Pass 1 (default): break room + continuous-work limit
+      Pass 2: break room only
+      Pass 3: availability only
+    """
+    for _, emp in candidates.iterrows():
+        name = emp["שם"]
+        if not is_within_shift(emp, start, end):
+            continue
+        if not is_available(assignments, name, start, end, emp,
+                            role=role, flight_gate=flight_gate):
+            continue
+        if check_break and not has_room_for_break(assignments, emp, name, start, end):
+            continue
+        if check_continuous and would_exceed_max_continuous(assignments, name, emp, start, end):
+            continue
+        return name
+    return None
 
 
 def build_schedule(flights_df, employees_df):
@@ -559,44 +552,14 @@ def build_schedule(flights_df, employees_df):
 
                 candidates = sort_candidates(candidates, assignments, role, start, end)
 
-                selected = None
-                for _, emp in candidates.iterrows():
-                    name = emp["שם"]
-                    if (
-                        is_within_shift(emp, start, end)
-                        and is_available(assignments, name, start, end, emp,
-                                        role=role,
-                                        flight_gate=clean_text(flight.get("גייט", "")))
-                        and has_room_for_break(assignments, emp, name, start, end)
-                        and not would_exceed_max_continuous(assignments, name, emp, start, end)
-                    ):
-                        selected = name
-                        break
-
-                if not selected:
-                    for _, emp in candidates.iterrows():
-                        name = emp["שם"]
-                        if (
-                            is_within_shift(emp, start, end)
-                            and is_available(assignments, name, start, end, emp,
-                                            role=role,
-                                            flight_gate=clean_text(flight.get("גייט", "")))
-                            and has_room_for_break(assignments, emp, name, start, end)
-                        ):
-                            selected = name
-                            break
-
-                if not selected:
-                    for _, emp in candidates.iterrows():
-                        name = emp["שם"]
-                        if (
-                            is_within_shift(emp, start, end)
-                            and is_available(assignments, name, start, end, emp,
-                                            role=role,
-                                            flight_gate=clean_text(flight.get("גייט", "")))
-                        ):
-                            selected = name
-                            break
+                gate = clean_text(flight.get("גייט", ""))
+                selected = (
+                    _try_select(candidates, assignments, role, start, end, gate) or
+                    _try_select(candidates, assignments, role, start, end, gate,
+                                check_continuous=False) or
+                    _try_select(candidates, assignments, role, start, end, gate,
+                                check_break=False, check_continuous=False)
+                )
 
                 if selected:
                     worker = selected
@@ -614,7 +577,7 @@ def build_schedule(flights_df, employees_df):
                     "עובד":       worker,
                     "התחלה":      start.strftime("%H:%M"),
                     "סיום":       end.strftime("%H:%M"),
-                    "_gate":      clean_text(flight.get("גייט", "")),
+                    "_gate":      gate,
                     "סיבה":       reason,
                 }
                 assignments.append(task)
@@ -642,41 +605,14 @@ def build_schedule(flights_df, employees_df):
 
             candidates = sort_candidates(candidates, assignments, role, start, end)
 
-            selected = None
-            for _, emp in candidates.iterrows():
-                name = emp["שם"]
-                if (
-                    is_within_shift(emp, start, end)
-                    and is_available(assignments, name, start, end, emp,
-                                    role=role, flight_gate=clean_text(flight.get("גייט", "")))
-                    and has_room_for_break(assignments, emp, name, start, end)
-                    and not would_exceed_max_continuous(assignments, name, emp, start, end)
-                ):
-                    selected = name
-                    break
-
-            if not selected:
-                for _, emp in candidates.iterrows():
-                    name = emp["שם"]
-                    if (
-                        is_within_shift(emp, start, end)
-                        and is_available(assignments, name, start, end, emp,
-                                        role=role, flight_gate=clean_text(flight.get("גייט", "")))
-                        and has_room_for_break(assignments, emp, name, start, end)
-                    ):
-                        selected = name
-                        break
-
-            if not selected:
-                for _, emp in candidates.iterrows():
-                    name = emp["שם"]
-                    if (
-                        is_within_shift(emp, start, end)
-                        and is_available(assignments, name, start, end, emp,
-                                        role=role, flight_gate=clean_text(flight.get("גייט", "")))
-                    ):
-                        selected = name
-                        break
+            gate = clean_text(flight.get("גייט", ""))
+            selected = (
+                _try_select(candidates, assignments, role, start, end, gate) or
+                _try_select(candidates, assignments, role, start, end, gate,
+                            check_continuous=False) or
+                _try_select(candidates, assignments, role, start, end, gate,
+                            check_break=False, check_continuous=False)
+            )
 
             if selected:
                 task = {
@@ -735,7 +671,7 @@ def upgrade_teamleads(assignments_df, employees_df):
             promoted_task = None
             for t in tl_as_agent:
                 worker_name = t["עובד"]
-                emp_row = find_emp_row(employees_df, worker_name)
+                emp_row = employees_df[employees_df["שם"] == worker_name]
                 if emp_row.empty:
                     continue
                 if str(emp_row.iloc[0].get("ראש צוות","")).strip() == "כן":
