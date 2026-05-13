@@ -1865,12 +1865,7 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
     _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
 
     _html  = _render_interactive_gantt(_sched, _sched, missing_df=_miss)
-    _n_workers = len(set(
-        str(w).strip() for w in _sched["עובד"].dropna().unique()
-        if "❌" not in str(w) and str(w).strip() not in ("","nan")
-    ))
-    _h = max(700, _n_workers * 22 + 120)
-    _components.html(_html, height=_h, scrolling=False)
+    _components.html(_html, height=2000, scrolling=False)
     st.stop()
 
 
@@ -2051,25 +2046,9 @@ if "schedule_df" in st.session_state:
         with tab_gantt:
             _sched = st.session_state["schedule_df"]
             _miss  = _sched[_sched["עובד"].astype(str).str.contains("❌", na=False)]
-            _g_html      = _render_interactive_gantt(_sched, _sched, missing_df=_miss)
-            _g_html_json = _json.dumps(_g_html, ensure_ascii=False)
-            _open_btn = f"""<style>
-body{{margin:0;padding:6px;background:transparent;}}
-.obtn{{width:100%;padding:11px;background:#071b3a;color:#00c9be;
-  border:1.5px solid #00c9be;border-radius:8px;font-size:15px;
-  font-weight:800;cursor:pointer;font-family:Arial,sans-serif;}}
-.obtn:active{{opacity:.7;}}
-</style>
-<button class="obtn" id="go">📅 פתח גאנט בחלון חדש</button>
-<script>
-var _ganttHtml = {_g_html_json};
-document.getElementById('go').onclick = function() {{
-  var blob = new Blob([_ganttHtml], {{type:'text/html;charset=utf-8'}});
-  var url  = URL.createObjectURL(blob);
-  window.open(url, '_blank');
-}};
-</script>"""
-            _components.html(_open_btn, height=60)
+            if st.button("📅 פתח גאנט", use_container_width=True, key="open_gantt_tab_btn"):
+                st.session_state["show_gantt_page"] = True
+                st.rerun()
 
         # ── Tab: פנויים באולם ─────────────────────────────────────────────────
         with tab_available:
