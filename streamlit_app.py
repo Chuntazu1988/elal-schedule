@@ -1855,6 +1855,12 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
         st.markdown(f'<div style="color:{_color};font-weight:800;font-size:14px;">{_smsg}</div>', unsafe_allow_html=True)
     st.markdown('<div style="direction:rtl;font-size:18px;font-weight:900;color:#00c9be;padding:4px 0 8px;">📅 גאנט עובדים</div>', unsafe_allow_html=True)
 
+    # ── הסתר padding של Streamlit לתצוגה מלאה ──
+    st.markdown("""<style>
+    .block-container{padding-top:0.5rem!important;padding-left:0.5rem!important;padding-right:0.5rem!important;}
+    header{visibility:hidden;}
+    </style>""", unsafe_allow_html=True)
+
     _sched  = st.session_state["schedule_df"]
     _timed2 = _sched[_sched["התחלה"].astype(str).str.strip() != ""].copy()
     _RCOL = {
@@ -1907,7 +1913,7 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
             axis=_alt2.Axis(orient="top", format="%H:%M", labelFontSize=12,
                 grid=True, gridColor="#cdd8ea", tickCount=24, labelAngle=0))
 
-        _bars2 = _alt2.Chart(_df2).mark_bar(height=28, cornerRadius=5).encode(
+        _bars2 = _alt2.Chart(_df2).mark_bar(height=42, cornerRadius=6).encode(
             x=_x2enc, x2=_alt2.X2("סיום_dt:T"),
             y=_alt2.Y("עובד:N", sort=_wsort2, title=None, axis=_alt2.Axis(
                 labelFontSize=13, labelFontWeight="bold",
@@ -1923,7 +1929,7 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
         ).add_params(_sel2)
 
         _lbl2 = _alt2.Chart(_df2).mark_text(
-            fontSize=10, fontWeight="bold", color="white",
+            fontSize=12, fontWeight="bold", color="white",
             baseline="middle", align="center",
         ).encode(
             x=_alt2.X("mid_dt:T",
@@ -1933,7 +1939,7 @@ if _goto_gantt_early and "schedule_df" in st.session_state:
         )
 
         _chart2 = (_stripe2 + _bars2 + _lbl2).properties(
-            height=_alt2.Step(38),
+            height=_alt2.Step(55),
         ).configure_view(stroke="#cdd8ea", strokeWidth=1).configure_axis(domainColor="#cdd8ea")
 
         try:
@@ -2226,7 +2232,7 @@ if "schedule_df" in st.session_state:
 
                     # ── בארים ────────────────────────────────────────────────
                     _bars = _alt.Chart(_df_g).mark_bar(
-                        height=28, cornerRadius=5,
+                        height=42, cornerRadius=6,
                     ).encode(
                         x=_x_enc,
                         x2=_alt.X2("סיום_dt:T"),
@@ -2256,7 +2262,7 @@ if "schedule_df" in st.session_state:
 
                     # ── תוויות טיסה על הבארים ────────────────────────────────
                     _labels = _alt.Chart(_df_g).mark_text(
-                        fontSize=10, fontWeight="bold", color="white",
+                        fontSize=12, fontWeight="bold", color="white",
                         baseline="middle", align="center",
                     ).encode(
                         x=_alt.X("mid_dt:T",
@@ -2266,7 +2272,7 @@ if "schedule_df" in st.session_state:
                     )
 
                     _chart = (_stripes + _bars + _labels).properties(
-                        height=_alt.Step(38),
+                        height=_alt.Step(55),
                     ).configure_view(
                         stroke="#cdd8ea", strokeWidth=1,
                     ).configure_axis(
