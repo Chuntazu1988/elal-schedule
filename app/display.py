@@ -3,7 +3,7 @@ import re
 import pandas as pd
 import streamlit as st
 
-from helpers import (
+from utils.helpers import (
     clean_text, safe_html, normalize_role_label, gender_role_label,
     is_time_text, to_datetime_time, time_to_minutes, minutes_between,
     short_flight_number, flight_key, name_key, name_key_reversed,
