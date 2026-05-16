@@ -9,7 +9,7 @@ import streamlit.components.v1 as _components
 import json as _json
 st.warning("DEV SERVER")
 # ── Local modules ─────────────────────────────────────────────────────────────
-ffrom app.styles import CSS, HERO_HTML, LEGEND_HTML, TOP_STRIP_HTML
+from app.styles import CSS, HERO_HTML, LEGEND_HTML, TOP_STRIP_HTML
 from utils.constants import USA_TSA_DESTS, QUEUE_DESTS, TWO_TEAM_LEADS_DESTS, ROLE_COLUMNS
 from utils.helpers import (
     clean_text, safe_html, normalize_role_label, gender_role_label,
