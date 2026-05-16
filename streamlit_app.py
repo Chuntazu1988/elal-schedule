@@ -28,6 +28,7 @@ from app.scheduler import (
     role_start_time, role_end_time,
 )
 from utils.constants import ROLE_ORDER
+
 from app.display import (
     build_next_task_labels, build_output_table, build_workload,
     build_counter_continuity_rows, build_available_in_hall, build_unassigned_agents,
