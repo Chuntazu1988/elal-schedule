@@ -11,7 +11,7 @@ st.warning("DEV SERVER")
 # ── Local modules ─────────────────────────────────────────────────────────────
 ffrom app.styles import CSS, HERO_HTML, LEGEND_HTML, TOP_STRIP_HTML
 from utils.constants import USA_TSA_DESTS, QUEUE_DESTS, TWO_TEAM_LEADS_DESTS, ROLE_COLUMNS
-from utils import helpers
+from utils.helpers import (
     clean_text, safe_html, normalize_role_label, gender_role_label,
     is_time_text, to_datetime_time, time_to_minutes,
     short_flight_number, flight_key, name_key,
