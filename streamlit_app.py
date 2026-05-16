@@ -11,7 +11,7 @@ st.warning("DEV SERVER")
 # ── Local modules ─────────────────────────────────────────────────────────────
 from styles    import CSS, HERO_HTML, LEGEND_HTML, TOP_STRIP_HTML
 from constants import USA_TSA_DESTS, QUEUE_DESTS, TWO_TEAM_LEADS_DESTS, ROLE_COLUMNS
-from helpers   import (
+from utils import helpers
     clean_text, safe_html, normalize_role_label, gender_role_label,
     is_time_text, to_datetime_time, time_to_minutes,
     short_flight_number, flight_key, name_key,
@@ -317,7 +317,7 @@ if _gantt_swap:
                     if _emp_r.empty:
                         _reason = "לא נמצא בקובץ העובדים"
                     else:
-                        from helpers import classify_shift, is_within_shift
+                        from utils.helpers import  classify_shift, is_within_shift
                         from scheduler import to_datetime_time, is_time_text
                         _er = _emp_r.iloc[0]
                         if is_time_text(_t_start) and is_time_text(_t_end):
