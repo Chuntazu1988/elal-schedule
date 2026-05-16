@@ -22,7 +22,7 @@ from data.data_loader import (
     build_shift_map_from_excel, apply_shift_map_to_employees,
     load_daily_schedule, normalize_employees,
 )
-from scheduler import (
+from app.scheduler import (
     get_requirements, requirements_text, build_schedule, upgrade_teamleads,
     is_within_shift, get_qualified_candidates_for_swap, do_swap,
     role_start_time, role_end_time,
