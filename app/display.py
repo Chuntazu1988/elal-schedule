@@ -11,7 +11,7 @@ from utils.helpers import (
     return_text_by_shift, break_deadline_before_flight,
     employee_shift_text, gap_minutes_to_next, next_task_plain_text,
 )
-from scheduler import (
+from app.scheduler import (
     requirements_text, get_qualified_candidates_for_swap, do_swap,
     is_within_shift,
 )
