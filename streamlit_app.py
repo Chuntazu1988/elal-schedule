@@ -18,7 +18,7 @@ from utils import helpers
     classify_shift, shift_length, break_label_for_employee,
     employee_shift_text, break_deadline_before_flight,
 )
-from data_loader import (
+from data.data_loader import (
     build_shift_map_from_excel, apply_shift_map_to_employees,
     load_daily_schedule, normalize_employees,
 )
